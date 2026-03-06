@@ -85,6 +85,7 @@ export async function scrapeTorrentsYTS(pages = 3, genre = null) {
           || torrents.find(t => t.quality === '720p')
           || torrents[0];
         if (!best) continue;
+        if (!best.seeds || best.seeds === 0) continue;
 
         const magnet = makeMagnet(best.hash, movie.title);
 
