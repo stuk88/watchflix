@@ -14,7 +14,7 @@ const TRACKERS = [
   'udp://tracker.coppersurfer.tk:6969',
 ].map(t => `&tr=${encodeURIComponent(t)}`).join('');
 
-function makeMagnet(hash, name) {
+export function makeMagnet(hash, name) {
   return `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(name)}${TRACKERS}`;
 }
 

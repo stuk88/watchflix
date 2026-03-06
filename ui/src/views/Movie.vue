@@ -66,7 +66,7 @@
 
     <!-- Torrent Player -->
     <div v-if="showTorrent">
-      <TorrentPlayer :magnet="movie.torrent_magnet" :quality="movie.torrent_quality" />
+      <TorrentPlayer :magnet="movie.torrent_magnet" :quality="movie.torrent_quality" :movie-id="movie.id" />
     </div>
 
     <!-- Single source buttons -->
@@ -74,7 +74,7 @@
       <div v-if="movie.source_url" class="player-area">
         <iframe :src="movie.source_url" allowfullscreen></iframe>
       </div>
-      <TorrentPlayer v-else-if="movie.torrent_magnet" :magnet="movie.torrent_magnet" :quality="movie.torrent_quality" />
+      <TorrentPlayer v-else-if="movie.torrent_magnet" :magnet="movie.torrent_magnet" :quality="movie.torrent_quality" :movie-id="movie.id" />
       <div v-else class="empty-state">
         <p>No streaming source available</p>
       </div>

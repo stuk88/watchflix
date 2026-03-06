@@ -1,5 +1,7 @@
 import { Router } from 'express';
+import axios from 'axios';
 import db from '../db.js';
+import { makeMagnet } from '../scrapers/torrents.js';
 
 const router = Router();
 
@@ -103,6 +105,90 @@ router.patch('/:id/hide', (req, res) => {
 // Update last watched
 router.patch('/:id/watched', (req, res) => {
   db.prepare('UPDATE movies SET last_watched = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Get alternative torrent sources (fallback when 0 peers)
+router.get('/:id/alt-sources', async (req, res) => {
+  const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+  const alternatives = [];
+
+  // Search YTS by imdb_id
+  if (movie.imdb_id) {
+    try {
+      const { data } = await axios.get('https://yts.torrentbay.st/api/v2/list_movies.json', {
+        params: { query_term: movie.imdb_id, limit: 10 },
+        timeout: 10000,
+      });
+      const movies = data?.data?.movies || [];
+      for (const m of movies) {
+        for (const t of (m.torrents || [])) {
+          if (!t.seeds || t.seeds === 0) continue;
+          alternatives.push({
+            source: 'yts',
+            magnet: makeMagnet(t.hash, m.title),
+            quality: t.quality || 'unknown',
+            seeds: t.seeds,
+            size: t.size || '',
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[alt-sources] YTS error:', err.message);
+    }
+  }
+
+  // Search TPB by title+year
+  const query = [movie.title, movie.year].filter(Boolean).join(' ');
+  try {
+    const { data } = await axios.get('https://apibay.org/q.php', {
+      params: { q: query, cat: '207' },
+      timeout: 10000,
+    });
+    if (Array.isArray(data) && !(data.length === 1 && data[0].name === 'No results returned')) {
+      const good = data.filter(t =>
+        parseInt(t.seeders) > 5 &&
+        t.info_hash && t.info_hash !== '0000000000000000000000000000000000000000'
+      );
+      for (const t of good.slice(0, 5)) {
+        const quality = /2160p|4k/i.test(t.name) ? '4K'
+          : /1080p/i.test(t.name) ? '1080p'
+          : /720p/i.test(t.name) ? '720p'
+          : /480p/i.test(t.name) ? '480p' : 'unknown';
+        const sizeBytes = parseInt(t.size) || 0;
+        const sizeStr = sizeBytes > 1e9
+          ? `${(sizeBytes / 1e9).toFixed(1)} GB`
+          : sizeBytes > 1e6
+          ? `${(sizeBytes / 1e6).toFixed(0)} MB` : '';
+        alternatives.push({
+          source: 'tpb',
+          magnet: makeMagnet(t.info_hash, t.name),
+          quality,
+          seeds: parseInt(t.seeders),
+          size: sizeStr,
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[alt-sources] TPB error:', err.message);
+  }
+
+  if (alternatives.length === 0) {
+    return res.json({ alternatives: [], dead: true });
+  }
+
+  // Sort by seeds descending
+  alternatives.sort((a, b) => b.seeds - a.seeds);
+  res.json({ alternatives });
+});
+
+// Delete a movie from DB
+router.delete('/:id', (req, res) => {
+  const movie = db.prepare('SELECT id FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+  db.prepare('DELETE FROM movies WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 
