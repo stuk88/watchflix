@@ -96,12 +96,10 @@ export async function scrapeTorrentsYTS(pages = 3, genre = null) {
           continue;
         }
 
-        const ratings = await fetchRatings(movie.title, movie.year);
+        // Use YTS data directly — skip OMDb to save API quota
+        if (movie.rating < config.minImdbRating) continue;
 
-        const entry = ratings && ratings.imdb_id ? {
-          ...ratings,
-          poster: ratings.poster || movie.large_cover_image,
-        } : {
+        insertStmt.run({
           title: movie.title,
           year: movie.year,
           imdb_id: movie.imdb_code,
@@ -114,13 +112,11 @@ export async function scrapeTorrentsYTS(pages = 3, genre = null) {
           runtime: movie.runtime ? `${movie.runtime} min` : null,
           director: null,
           actors: null,
-        };
-
-        if (!entry.imdb_rating || entry.imdb_rating < config.minImdbRating) continue;
-
-        insertStmt.run({ ...entry, source: 'torrent', torrent_magnet: magnet, torrent_quality: best.quality });
+          source: 'torrent',
+          torrent_magnet: magnet,
+          torrent_quality: best.quality,
+        });
         saved++;
-        await new Promise(r => setTimeout(r, 200));
       }
 
       process.stdout.write(`  [${label}] Page ${page}/${pages}: ${movies.length} found\r`);
