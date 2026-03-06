@@ -81,13 +81,15 @@ async function checkPeers() {
 
   try {
     const { data } = await axios.get(`/api/movies/${props.movieId}/alt-sources`);
-    if (data.dead || !data.alternatives?.length) {
+    console.log('Alt sources response:', data);
+    if (data.dead || !data.alternatives || data.alternatives.length === 0) {
       noPeerStatus.value = 'dead';
     } else {
       altSources.value = data.alternatives;
       noPeerStatus.value = 'found';
     }
-  } catch {
+  } catch (err) {
+    console.error('Alt sources fetch error:', err);
     noPeerStatus.value = 'dead';
   }
 }
@@ -105,22 +107,33 @@ async function switchToAlt(alt) {
 
 function attachTorrent(magnetUri) {
   activeTorrent = null;
-  client.add(magnetUri, (torrent) => {
-    activeTorrent = torrent;
+
+  // Start peer check timer immediately — don't wait for metadata
+  if (peerCheckTimer) clearTimeout(peerCheckTimer);
+  if (props.movieId) {
+    peerCheckTimer = setTimeout(checkPeers, 15000);
+  }
+
+  const torrent = client.add(magnetUri);
+  activeTorrent = torrent;
+
+  // Update stats immediately (even before metadata)
+  interval = setInterval(() => {
+    downloadSpeed.value = formatSpeed(torrent.downloadSpeed);
+    uploadSpeed.value = formatSpeed(torrent.uploadSpeed);
+    peers.value = torrent.numPeers;
+    progress.value = (torrent.progress * 100).toFixed(1);
+  }, 1000);
+
+  torrent.on('ready', () => {
     const file = torrent.files.reduce((a, b) => a.length > b.length ? a : b);
-    file.renderTo(videoEl.value, { autoplay: true });
-
-    interval = setInterval(() => {
-      downloadSpeed.value = formatSpeed(torrent.downloadSpeed);
-      uploadSpeed.value = formatSpeed(torrent.uploadSpeed);
-      peers.value = torrent.numPeers;
-      progress.value = (torrent.progress * 100).toFixed(1);
-    }, 1000);
-
-    // Check for peers after 15 seconds
-    if (props.movieId) {
-      peerCheckTimer = setTimeout(checkPeers, 15000);
+    if (videoEl.value) {
+      file.renderTo(videoEl.value, { autoplay: true });
     }
+  });
+
+  torrent.on('error', (err) => {
+    console.error('Torrent error:', err);
   });
 }
 
