@@ -14,6 +14,7 @@
       <nav class="nav-links">
         <router-link to="/" class="nav-link">Home</router-link>
         <router-link to="/favorites" class="nav-link">★ Favorites</router-link>
+        <router-link to="/hidden" class="nav-link">🙈 Hidden</router-link>
         <button class="btn-scrape" @click="store.triggerScrape()" :disabled="store.scraping">
           {{ store.scraping ? '⏳ Scraping...' : '🔄 Update' }}
         </button>

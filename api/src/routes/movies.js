@@ -15,6 +15,8 @@ router.get('/', (req, res) => {
     min_rating,
     search,
     favorites,
+    show_hidden,
+    only_hidden,
   } = req.query;
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -46,7 +48,9 @@ router.get('/', (req, res) => {
   }
 
   // Always exclude hidden unless explicitly requested
-  if (req.query.show_hidden !== '1') {
+  if (only_hidden === '1') {
+    conditions.push("is_hidden = 1");
+  } else if (show_hidden !== '1') {
     conditions.push("is_hidden = 0");
   }
 

@@ -7,9 +7,9 @@
     >{{ movie.is_favorite ? '★' : '☆' }}</button>
     <button
       class="hide-btn"
-      @click.stop="$emit('hide', movie.id)"
-      title="Hide movie"
-    >✕</button>
+      @click.stop="canUnhide ? $emit('unhide', movie.id) : $emit('hide', movie.id)"
+      :title="canUnhide ? 'Unhide movie' : 'Hide movie'"
+    >{{ canUnhide ? '↩' : '✕' }}</button>
     <img
       class="poster"
       :src="movie.poster || '/placeholder.svg'"
@@ -34,8 +34,8 @@
 <script setup>
 import { computed } from 'vue';
 
-const props = defineProps({ movie: Object });
-defineEmits(['toggle-fav', 'hide']);
+const props = defineProps({ movie: Object, canUnhide: Boolean });
+defineEmits(['toggle-fav', 'hide', 'unhide']);
 
 const ratingClass = computed(() => {
   const r = props.movie.imdb_rating;
