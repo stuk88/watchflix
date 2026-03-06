@@ -5,6 +5,11 @@
       :class="{ active: movie.is_favorite }"
       @click.stop="$emit('toggle-fav', movie.id)"
     >{{ movie.is_favorite ? '★' : '☆' }}</button>
+    <button
+      class="hide-btn"
+      @click.stop="$emit('hide', movie.id)"
+      title="Hide movie"
+    >✕</button>
     <img
       class="poster"
       :src="movie.poster || '/placeholder.svg'"
@@ -30,7 +35,7 @@
 import { computed } from 'vue';
 
 const props = defineProps({ movie: Object });
-defineEmits(['toggle-fav']);
+defineEmits(['toggle-fav', 'hide']);
 
 const ratingClass = computed(() => {
   const r = props.movie.imdb_rating;

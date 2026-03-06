@@ -49,6 +49,16 @@ export const useMoviesStore = defineStore('movies', {
       }
     },
 
+    async hideMovie(id) {
+      try {
+        await axios.patch(`/api/movies/${id}/hide`);
+        this.movies = this.movies.filter(m => m.id !== id);
+        this.total--;
+      } catch (err) {
+        console.error('Failed to hide movie:', err);
+      }
+    },
+
     async triggerScrape() {
       this.scraping = true;
       try {

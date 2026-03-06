@@ -45,6 +45,11 @@ router.get('/', (req, res) => {
     conditions.push("is_favorite = 1");
   }
 
+  // Always exclude hidden unless explicitly requested
+  if (req.query.show_hidden !== '1') {
+    conditions.push("is_hidden = 0");
+  }
+
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const allowedSorts = ['added_at', 'imdb_rating', 'title', 'year'];
@@ -79,6 +84,16 @@ router.patch('/:id/favorite', (req, res) => {
   const newVal = movie.is_favorite ? 0 : 1;
   db.prepare('UPDATE movies SET is_favorite = ? WHERE id = ?').run(newVal, movie.id);
   res.json({ id: movie.id, is_favorite: newVal });
+});
+
+// Toggle hidden
+router.patch('/:id/hide', (req, res) => {
+  const movie = db.prepare('SELECT id, is_hidden FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+  const newVal = movie.is_hidden ? 0 : 1;
+  db.prepare('UPDATE movies SET is_hidden = ? WHERE id = ?').run(newVal, movie.id);
+  res.json({ id: movie.id, is_hidden: newVal });
 });
 
 // Update last watched

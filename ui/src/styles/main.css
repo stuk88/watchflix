@@ -286,6 +286,28 @@ a { color: inherit; text-decoration: none; }
 .fav-btn:hover { background: rgba(0,0,0,0.8); }
 .fav-btn.active { color: #f5c518; }
 
+.hide-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  background: rgba(0,0,0,0.5);
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+  color: #888;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s, color 0.2s;
+}
+.movie-card:hover .hide-btn { opacity: 1; }
+.hide-btn:hover { background: rgba(244,67,54,0.8); color: #fff; }
+
 /* Movie Detail Page */
 .movie-detail {
   max-width: 900px;

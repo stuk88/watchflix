@@ -16,6 +16,7 @@
           :key="movie.id"
           :movie="movie"
           @toggle-fav="store.toggleFavorite($event)"
+          @hide="store.hideMovie($event)"
         />
       </div>
 
