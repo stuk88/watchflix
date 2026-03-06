@@ -185,13 +185,56 @@ router.get('/:id/alt-sources', async (req, res) => {
     console.error('[alt-sources] TPB error:', err.message);
   }
 
+  // Search TorrentCSV by title+year
+  try {
+    const csvQuery = [movie.title, movie.year].filter(Boolean).join(' ');
+    const { data } = await axios.get('https://torrents-csv.com/service/search', {
+      params: { q: csvQuery, size: 15 },
+      timeout: 10000,
+    });
+    const torrents = data?.torrents || [];
+    for (const t of torrents) {
+      if (!t.infohash || !t.seeders || t.seeders < 3) continue;
+      // Skip tiny files (< 300MB) and non-video (soundtracks, subs-only)
+      if (t.size_bytes < 300000000) continue;
+      const quality = /2160p|4k/i.test(t.name) ? '4K'
+        : /1080p/i.test(t.name) ? '1080p'
+        : /720p/i.test(t.name) ? '720p'
+        : /480p/i.test(t.name) ? '480p' : 'unknown';
+      const sizeStr = t.size_bytes > 1e9
+        ? `${(t.size_bytes / 1e9).toFixed(1)} GB`
+        : `${(t.size_bytes / 1e6).toFixed(0)} MB`;
+      alternatives.push({
+        source: 'csv',
+        magnet: makeMagnet(t.infohash, t.name),
+        quality,
+        seeds: t.seeders,
+        size: sizeStr,
+      });
+    }
+  } catch (err) {
+    console.error('[alt-sources] TorrentCSV error:', err.message);
+  }
+
   if (alternatives.length === 0) {
     return res.json({ alternatives: [], dead: true });
   }
 
+  // Deduplicate by infohash (keep highest seeds)
+  const byHash = new Map();
+  for (const alt of alternatives) {
+    const hashMatch = alt.magnet.match(/btih:([a-fA-F0-9]+)/i);
+    const hash = hashMatch ? hashMatch[1].toUpperCase() : alt.magnet;
+    const existing = byHash.get(hash);
+    if (!existing || alt.seeds > existing.seeds) {
+      byHash.set(hash, alt);
+    }
+  }
+  const deduped = [...byHash.values()];
+
   // Sort by seeds descending
-  alternatives.sort((a, b) => b.seeds - a.seeds);
-  res.json({ alternatives });
+  deduped.sort((a, b) => b.seeds - a.seeds);
+  res.json({ alternatives: deduped });
 });
 
 // Delete a movie from DB

@@ -247,5 +247,70 @@ export async function scrapeTorrents(pages = 3) {
   let total = 0;
   total += await scrapeTorrentsYTS(pages);
   total += await scrapeTorrentsTPBTop();
+  total += await scrapeTorrentsCSV();
   return total;
+}
+
+// ============================================================
+// TorrentCSV Scraper (torrents-csv.com)
+// ============================================================
+export async function scrapeTorrentsCSV() {
+  const searches = [
+    '2025', '2024', '2023', '1080p BluRay', '2160p 4K',
+  ];
+  console.log(`[torrents] Scraping TorrentCSV for ${searches.length} terms...`);
+  let saved = 0;
+
+  for (const term of searches) {
+    try {
+      const { data } = await axios.get('https://torrents-csv.com/service/search', {
+        params: { q: term, size: 50 },
+        timeout: 15000,
+      });
+
+      const torrents = data?.torrents || [];
+
+      for (const t of torrents) {
+        if (!t.infohash || !t.seeders || t.seeders < 5) continue;
+        // Skip small files (not movies)
+        if (t.size_bytes < 500 * 1024 * 1024) continue;
+
+        const { title, year } = parseTorrentName(t.name);
+        if (!title) continue;
+
+        const quality = detectQuality(t.name);
+        const magnet = makeMagnet(t.infohash, t.name);
+
+        // Check if we already have this hash
+        const existingHash = db.prepare('SELECT id FROM movies WHERE torrent_magnet LIKE ?').get(`%${t.infohash.toUpperCase()}%`);
+        if (existingHash) continue;
+
+        const ratings = await fetchRatings(title, year);
+        if (!ratings || !ratings.imdb_id) continue;
+        if (!ratings.imdb_rating || ratings.imdb_rating < config.minImdbRating) continue;
+
+        const existing = db.prepare('SELECT id, source FROM movies WHERE imdb_id = ?').get(ratings.imdb_id);
+        if (existing) {
+          if (existing.source === '123movies') {
+            updateStmt.run({ imdb_id: ratings.imdb_id, torrent_magnet: magnet, torrent_quality: quality });
+          }
+          continue;
+        }
+
+        insertStmt.run({ ...ratings, source: 'torrent', torrent_magnet: magnet, torrent_quality: quality });
+        saved++;
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      process.stdout.write(`  [CSV] "${term}": ${torrents.length} results\r`);
+    } catch (err) {
+      console.error(`  [CSV] "${term}" error: ${err.message}`);
+    }
+
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  console.log(`  [CSV] ✅ Saved ${saved} movies`);
+  db.prepare('INSERT INTO scrape_log (source, count) VALUES (?, ?)').run('csv', saved);
+  return saved;
 }
