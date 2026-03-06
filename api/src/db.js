@@ -33,7 +33,9 @@ db.exec(`
     torrent_quality TEXT,
     added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     is_favorite INTEGER DEFAULT 0,
-    last_watched DATETIME
+    last_watched DATETIME,
+    tmdb_id TEXT,
+    is_hidden INTEGER DEFAULT 0
   );
 
   CREATE INDEX IF NOT EXISTS idx_imdb_rating ON movies(imdb_rating);

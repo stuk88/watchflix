@@ -52,16 +52,16 @@
     <!-- Source Tabs -->
     <div class="source-tabs" v-if="hasBothSources">
       <button class="source-tab" :class="{ active: activeTab === '123movies' }" @click="activeTab = '123movies'">
-        🎬 Stream (123Movies)
+        🌐 Watch Online
       </button>
       <button class="source-tab" :class="{ active: activeTab === 'torrent' }" @click="activeTab = 'torrent'">
-        🧲 Torrent (WebTorrent)
+        🧲 Torrent Stream
       </button>
     </div>
 
-    <!-- 123Movies Player -->
-    <div v-if="show123" class="player-area">
-      <iframe :src="movie.source_url" allowfullscreen></iframe>
+    <!-- 123Movies HLS Player -->
+    <div v-if="show123">
+      <HlsPlayer :movie-id="movie.id" />
     </div>
 
     <!-- Torrent Player -->
@@ -69,10 +69,10 @@
       <TorrentPlayer :magnet="movie.torrent_magnet" :quality="movie.torrent_quality" :movie-id="movie.id" />
     </div>
 
-    <!-- Single source buttons -->
+    <!-- Single source -->
     <div v-if="!hasBothSources">
-      <div v-if="movie.source_url" class="player-area">
-        <iframe :src="movie.source_url" allowfullscreen></iframe>
+      <div v-if="movie.source_url && movie.source !== 'torrent'">
+        <HlsPlayer :movie-id="movie.id" />
       </div>
       <TorrentPlayer v-else-if="movie.torrent_magnet" :magnet="movie.torrent_magnet" :quality="movie.torrent_quality" :movie-id="movie.id" />
       <div v-else class="empty-state">
@@ -89,6 +89,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import axios from 'axios';
 import TorrentPlayer from '../components/TorrentPlayer.vue';
+import HlsPlayer from '../components/HlsPlayer.vue';
 
 const route = useRoute();
 const movie = ref(null);
