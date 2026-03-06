@@ -2,6 +2,7 @@ import { Router } from 'express';
 import axios from 'axios';
 import db from '../db.js';
 import { makeMagnet } from '../scrapers/torrents.js';
+import { getVideoFile, getStats } from '../services/streamer.js';
 
 const router = Router();
 
@@ -108,6 +109,15 @@ router.patch('/:id/watched', (req, res) => {
   res.json({ ok: true });
 });
 
+// Update magnet (used when switching to alt source)
+router.patch('/:id/magnet', (req, res) => {
+  const { torrent_magnet, torrent_quality } = req.body;
+  if (!torrent_magnet) return res.status(400).json({ error: 'Missing torrent_magnet' });
+  db.prepare('UPDATE movies SET torrent_magnet = ?, torrent_quality = ? WHERE id = ?')
+    .run(torrent_magnet, torrent_quality || null, req.params.id);
+  res.json({ ok: true });
+});
+
 // Get alternative torrent sources (fallback when 0 peers)
 router.get('/:id/alt-sources', async (req, res) => {
   const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
@@ -190,6 +200,62 @@ router.delete('/:id', (req, res) => {
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
   db.prepare('DELETE FROM movies WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// Stream torrent video via server-side WebTorrent (HTTP range support)
+router.get('/:id/stream', async (req, res) => {
+  const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+  if (!movie.torrent_magnet) return res.status(400).json({ error: 'No torrent magnet' });
+
+  try {
+    const { file } = await getVideoFile(movie.torrent_magnet);
+    const fileSize = file.length;
+
+    // Content-Type based on extension
+    const ext = file.name.split('.').pop().toLowerCase();
+    const mimeTypes = { mp4: 'video/mp4', mkv: 'video/x-matroska', avi: 'video/x-msvideo', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4' };
+    const contentType = mimeTypes[ext] || 'video/mp4';
+
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunkSize = end - start + 1;
+
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': contentType,
+      });
+
+      const stream = file.createReadStream({ start, end });
+      stream.pipe(res);
+      stream.on('error', () => res.end());
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+      });
+      const stream = file.createReadStream();
+      stream.pipe(res);
+      stream.on('error', () => res.end());
+    }
+  } catch (err) {
+    console.error('[stream] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get torrent streaming stats
+router.get('/:id/stream-stats', (req, res) => {
+  const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie?.torrent_magnet) return res.json({ peers: 0 });
+  const stats = getStats(movie.torrent_magnet);
+  res.json(stats || { peers: 0 });
 });
 
 export default router;

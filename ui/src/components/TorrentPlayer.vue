@@ -2,27 +2,39 @@
   <div class="torrent-player">
     <div v-if="!started" class="player-start" @click="startPlayer">
       <div class="start-icon">▶</div>
-      <div class="start-text">Start Streaming via WebTorrent</div>
+      <div class="start-text">Start Streaming</div>
       <div class="start-quality" v-if="quality">{{ quality }}</div>
     </div>
     <div v-else>
-      <video ref="videoEl" controls autoplay class="player-video"></video>
+      <video
+        ref="videoEl"
+        controls
+        autoplay
+        class="player-video"
+        :src="streamUrl"
+        @error="onVideoError"
+      ></video>
       <div class="torrent-info">
         <span>⬇ {{ downloadSpeed }}</span>
         <span>⬆ {{ uploadSpeed }}</span>
-        <span>👥 {{ peers }} peers</span>
+        <span>👥 {{ peerCount }} peers</span>
         <span>📊 {{ progress }}%</span>
       </div>
 
+      <!-- Loading state -->
+      <div v-if="status === 'loading'" class="fallback-msg">
+        Connecting to peers and loading metadata...
+      </div>
+
       <!-- Zero-peer fallback UI -->
-      <div v-if="noPeerStatus === 'searching'" class="fallback-msg">
+      <div v-if="status === 'searching'" class="fallback-msg">
         No peers found. Searching for alternatives...
       </div>
-      <div v-else-if="noPeerStatus === 'dead'" class="fallback-dead">
+      <div v-else-if="status === 'dead'" class="fallback-dead">
         <p>No sources available for this movie.</p>
         <button class="btn btn-danger" @click="removeMovie">🗑 Remove Movie</button>
       </div>
-      <div v-else-if="noPeerStatus === 'found'" class="fallback-alts">
+      <div v-else-if="status === 'found'" class="fallback-alts">
         <p>No peers on current source. Try an alternative:</p>
         <div class="alt-list">
           <button
@@ -41,7 +53,7 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue';
+import { ref, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from 'axios';
 
@@ -56,17 +68,20 @@ const started = ref(false);
 const videoEl = ref(null);
 const downloadSpeed = ref('0 KB/s');
 const uploadSpeed = ref('0 KB/s');
-const peers = ref(0);
+const peerCount = ref(0);
 const progress = ref(0);
 
-// 'idle' | 'searching' | 'found' | 'dead'
-const noPeerStatus = ref('idle');
+// 'idle' | 'loading' | 'playing' | 'searching' | 'found' | 'dead'
+const status = ref('idle');
 const altSources = ref([]);
 
-let client = null;
-let interval = null;
+// Current stream movie ID (can change when switching to alt)
+const activeMovieId = ref(null);
+const activeStreamUrl = ref('');
+let statsInterval = null;
 let peerCheckTimer = null;
-let activeTorrent = null;
+
+const streamUrl = computed(() => activeStreamUrl.value);
 
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -74,94 +89,81 @@ function formatSpeed(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB/s`;
 }
 
+async function pollStats() {
+  if (!activeMovieId.value) return;
+  try {
+    const { data } = await axios.get(`/api/movies/${activeMovieId.value}/stream-stats`);
+    if (data) {
+      peerCount.value = data.peers || 0;
+      downloadSpeed.value = formatSpeed(data.downloadSpeed || 0);
+      uploadSpeed.value = formatSpeed(data.uploadSpeed || 0);
+      progress.value = data.total ? ((data.downloaded / data.total) * 100).toFixed(1) : 0;
+
+      // Once we have peers, we're playing
+      if (data.peers > 0 && status.value === 'loading') {
+        status.value = 'playing';
+      }
+    }
+  } catch {}
+}
+
+function startPlayer() {
+  if (!props.movieId) return;
+  started.value = true;
+  status.value = 'loading';
+  activeMovieId.value = props.movieId;
+  activeStreamUrl.value = `/api/movies/${props.movieId}/stream`;
+
+  // Poll stats every 2s
+  statsInterval = setInterval(pollStats, 2000);
+
+  // Check for peers after 15s
+  peerCheckTimer = setTimeout(checkPeers, 15000);
+}
+
 async function checkPeers() {
-  if (!activeTorrent || activeTorrent.numPeers > 0) return;
+  if (peerCount.value > 0) return;
 
-  noPeerStatus.value = 'searching';
-
+  status.value = 'searching';
   try {
     const { data } = await axios.get(`/api/movies/${props.movieId}/alt-sources`);
-    console.log('Alt sources response:', data);
     if (data.dead || !data.alternatives || data.alternatives.length === 0) {
-      noPeerStatus.value = 'dead';
+      status.value = 'dead';
     } else {
       altSources.value = data.alternatives;
-      noPeerStatus.value = 'found';
+      status.value = 'found';
     }
   } catch (err) {
-    console.error('Alt sources fetch error:', err);
-    noPeerStatus.value = 'dead';
+    console.error('Alt sources error:', err);
+    status.value = 'dead';
   }
 }
 
 async function switchToAlt(alt) {
-  noPeerStatus.value = 'idle';
+  status.value = 'loading';
   altSources.value = [];
 
-  // Destroy current torrent and restart with new magnet
-  if (activeTorrent) activeTorrent.destroy();
-  if (interval) clearInterval(interval);
-
-  attachTorrent(alt.magnet);
-}
-
-function attachTorrent(magnetUri) {
-  activeTorrent = null;
-
-  // Start peer check timer immediately — don't wait for metadata
-  if (peerCheckTimer) clearTimeout(peerCheckTimer);
-  if (props.movieId) {
-    peerCheckTimer = setTimeout(checkPeers, 15000);
-  }
-
-  const torrent = client.add(magnetUri);
-  activeTorrent = torrent;
-
-  // Update stats immediately (even before metadata)
-  interval = setInterval(() => {
-    downloadSpeed.value = formatSpeed(torrent.downloadSpeed);
-    uploadSpeed.value = formatSpeed(torrent.uploadSpeed);
-    peers.value = torrent.numPeers;
-    progress.value = (torrent.progress * 100).toFixed(1);
-  }, 1000);
-
-  torrent.on('ready', () => {
-    const file = torrent.files.reduce((a, b) => a.length > b.length ? a : b);
-    if (videoEl.value) {
-      file.renderTo(videoEl.value, { autoplay: true });
-    }
-  });
-
-  torrent.on('error', (err) => {
-    console.error('Torrent error:', err);
-  });
-}
-
-function loadWebTorrent() {
-  return new Promise((resolve, reject) => {
-    if (window.WebTorrent) return resolve(window.WebTorrent);
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/webtorrent@2.5.1/webtorrent.min.js';
-    script.onload = () => {
-      if (window.WebTorrent) resolve(window.WebTorrent);
-      else reject(new Error('WebTorrent failed to load'));
-    };
-    script.onerror = () => reject(new Error('Failed to load WebTorrent script'));
-    document.head.appendChild(script);
-  });
-}
-
-async function startPlayer() {
-  if (!props.magnet) return;
-  started.value = true;
-
+  // Update movie's magnet in DB, then re-stream
   try {
-    const WebTorrent = await loadWebTorrent();
-    client = new WebTorrent();
-    attachTorrent(props.magnet);
-  } catch (err) {
-    console.error('WebTorrent load error:', err);
-    noPeerStatus.value = 'dead';
+    await axios.patch(`/api/movies/${props.movieId}/magnet`, {
+      torrent_magnet: alt.magnet,
+      torrent_quality: alt.quality,
+    });
+  } catch {}
+
+  activeStreamUrl.value = '';
+  // Force re-render by toggling URL
+  await new Promise(r => setTimeout(r, 100));
+  activeStreamUrl.value = `/api/movies/${props.movieId}/stream?t=${Date.now()}`;
+
+  if (peerCheckTimer) clearTimeout(peerCheckTimer);
+  peerCheckTimer = setTimeout(checkPeers, 15000);
+}
+
+function onVideoError() {
+  // Video failed — likely stream errored
+  if (status.value === 'loading') {
+    checkPeers();
   }
 }
 
@@ -172,9 +174,8 @@ async function removeMovie() {
 }
 
 onUnmounted(() => {
-  if (interval) clearInterval(interval);
+  if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
-  if (client) client.destroy();
 });
 </script>
 
@@ -213,6 +214,13 @@ onUnmounted(() => {
   width: 100%;
   border-radius: 8px;
   background: #000;
+}
+.torrent-info {
+  display: flex;
+  gap: 16px;
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 .fallback-msg {
   margin-top: 12px;
