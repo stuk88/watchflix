@@ -4,6 +4,6 @@ export default {
   minImdbRating: 6.0,
   sources: {
     movies123: 'https://ww6.123movieshd.com',
-    ytsApi: 'https://yts.mx/api/v2'
+    ytsApi: 'https://yts.torrentbay.st/api/v2'
   }
 };
