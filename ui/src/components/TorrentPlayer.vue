@@ -124,21 +124,32 @@ function attachTorrent(magnetUri) {
   });
 }
 
+function loadWebTorrent() {
+  return new Promise((resolve, reject) => {
+    if (window.WebTorrent) return resolve(window.WebTorrent);
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/webtorrent@2.5.1/webtorrent.min.js';
+    script.onload = () => {
+      if (window.WebTorrent) resolve(window.WebTorrent);
+      else reject(new Error('WebTorrent failed to load'));
+    };
+    script.onerror = () => reject(new Error('Failed to load WebTorrent script'));
+    document.head.appendChild(script);
+  });
+}
+
 async function startPlayer() {
   if (!props.magnet) return;
   started.value = true;
 
-  // Dynamic import WebTorrent (browser bundle)
-  const WebTorrent = (await import('https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js')).default
-    || window.WebTorrent;
-
-  if (!WebTorrent) {
-    console.error('WebTorrent not loaded');
-    return;
+  try {
+    const WebTorrent = await loadWebTorrent();
+    client = new WebTorrent();
+    attachTorrent(props.magnet);
+  } catch (err) {
+    console.error('WebTorrent load error:', err);
+    noPeerStatus.value = 'dead';
   }
-
-  client = new WebTorrent();
-  attachTorrent(props.magnet);
 }
 
 async function removeMovie() {
