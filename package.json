@@ -1,0 +1,13 @@
+{
+  "name": "watchflix",
+  "private": true,
+  "workspaces": ["api", "ui"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:ui\"",
+    "dev:api": "npm run dev -w api",
+    "dev:ui": "npm run dev -w ui"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
