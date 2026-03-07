@@ -47,6 +47,15 @@
           <span v-else class="sub-downloads">📦 from torrent</span>
         </button>
       </div>
+      <!-- Subtitle sync controls -->
+      <div v-if="activeSubUrl" class="sync-bar">
+        <button class="btn btn-sync" @click="adjustOffset(-5)">-5s</button>
+        <button class="btn btn-sync" @click="adjustOffset(-0.5)">-0.5s</button>
+        <span class="sync-label">Sync: {{ subOffset >= 0 ? '+' : '' }}{{ subOffset.toFixed(1) }}s</span>
+        <button class="btn btn-sync" @click="adjustOffset(0.5)">+0.5s</button>
+        <button class="btn btn-sync" @click="adjustOffset(5)">+5s</button>
+        <button class="btn btn-sync btn-sync-reset" @click="adjustOffset(-subOffset)">Reset</button>
+      </div>
       <!-- Torrent filename -->
       <div v-if="torrentFilename" class="torrent-filename">📁 {{ torrentFilename }}</div>
       <div class="torrent-info">
@@ -127,7 +136,7 @@ const showSubPicker = ref(false);
 const pickerFiles = ref([]);
 const activeSubUrl = ref(null);
 const torrentFilename = ref('');
-let subtitleCues = [];
+const subOffset = ref(0);let subtitleCues = [];
 let timeUpdateListener = null;
 
 function formatSpeed(bytes) {
@@ -246,6 +255,7 @@ function toggleLangPicker(lang) {
 
 async function selectSubtitleFile(file) {
   clearSubtitleListener();
+  subOffset.value = 0;
 
   if (!file) {
     currentSubtitle.value = null;
@@ -262,7 +272,7 @@ async function selectSubtitleFile(file) {
     const vttText = await response.text();
     subtitleCues = parseVTT(vttText);
     timeUpdateListener = () => {
-      const time = videoEl.value?.currentTime ?? 0;
+      const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
       const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
       currentSubtitleText.value = cue ? cue.text : '';
     };
@@ -270,6 +280,10 @@ async function selectSubtitleFile(file) {
   } catch (err) {
     console.error('[subtitles] Failed to load VTT:', err);
   }
+}
+
+function adjustOffset(delta) {
+  subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
 }
 
 function startPlayer() {
@@ -493,6 +507,34 @@ onUnmounted(() => {
   color: var(--text-muted);
   padding: 4px 0;
   word-break: break-all;
+}
+.sync-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.sync-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 80px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.btn-sync {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+.btn-sync:hover { background: rgba(255,255,255,0.1); }
+.btn-sync-reset {
+  margin-left: 4px;
+  color: var(--text-muted);
 }
 .torrent-info {
   display: flex;
