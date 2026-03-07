@@ -7,7 +7,8 @@ import { startScheduler } from './services/scheduler.js';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Subtitle cues for whisper-sync can be large (1000+ cues × ~100 bytes each)
+app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 app.use('/api/movies', moviesRouter);
