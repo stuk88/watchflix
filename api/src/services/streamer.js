@@ -89,5 +89,6 @@ export function getStats(magnet) {
     progress: t.progress,
     downloaded: t.downloaded,
     total: entry.file?.length || 0,
+    filename: entry.file?.name || null,
   };
 }

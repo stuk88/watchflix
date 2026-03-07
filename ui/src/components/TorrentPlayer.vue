@@ -95,6 +95,7 @@ const activeMovieId = ref(null);
 const activeStreamUrl = ref('');
 let statsInterval = null;
 let peerCheckTimer = null;
+let subtitlesFetched = false;
 
 const streamUrl = computed(() => activeStreamUrl.value);
 
@@ -124,13 +125,20 @@ async function pollStats() {
       if (data.peers > 0 && status.value === 'loading') {
         status.value = 'playing';
       }
+
+      // Fetch subtitles by filename once available
+      if (data.filename && !subtitlesFetched) {
+        subtitlesFetched = true;
+        fetchSubtitlesForMovie(data.filename);
+      }
     }
   } catch {}
 }
 
-async function fetchSubtitlesForMovie() {
+async function fetchSubtitlesForMovie(filename) {
   try {
-    const { data } = await axios.get(`/api/movies/${props.movieId}/subtitles`);
+    const params = filename ? `?filename=${encodeURIComponent(filename)}` : '';
+    const { data } = await axios.get(`/api/movies/${props.movieId}/subtitles${params}`);
     subtitleTracks.value = data.tracks || [];
   } catch (err) {
     console.error('[torrent-player] Subtitle fetch error:', err.message);
@@ -195,7 +203,8 @@ function startPlayer() {
   activeMovieId.value = props.movieId;
   activeStreamUrl.value = `/api/movies/${props.movieId}/stream`;
 
-  fetchSubtitlesForMovie();
+  fetchSubtitlesForMovie(); // initial fetch by IMDB ID, will upgrade to filename match once torrent metadata arrives
+  subtitlesFetched = false;
 
   // Poll stats every 2s
   statsInterval = setInterval(pollStats, 2000);

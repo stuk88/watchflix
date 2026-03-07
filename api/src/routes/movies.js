@@ -4,7 +4,7 @@ import db from '../db.js';
 import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats } from '../services/streamer.js';
 import { extractStreamUrl, getAvailableServers } from '../services/stream-extractor.js';
-import { fetchSubtitles, fetchAndConvertSubtitle } from '../services/subtitles.js';
+import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle } from '../services/subtitles.js';
 
 const router = Router();
 
@@ -329,14 +329,22 @@ router.get('/:id/123proxy', async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Missing url param' });
 
+  // Reject non-HTTP URLs early to avoid cryptic "Invalid URL" errors
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    console.error('[123proxy] Invalid URL (not http/https):', url.substring(0, 100));
+    return res.status(400).json({ error: 'Invalid URL: must be http(s)' });
+  }
+
+  try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+
   try {
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 15000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Referer': 'https://vidnest.fun/',
-        'Origin': 'https://vidnest.fun',
+        'Referer': 'https://embos.net/',
+        'Origin': 'https://embos.net',
       },
     });
 
@@ -383,7 +391,9 @@ router.get('/:id/subtitles', async (req, res) => {
     const movie = db.prepare('SELECT imdb_id FROM movies WHERE id = ?').get(req.params.id);
     if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
-    const tracks = await fetchSubtitles(req.params.id);
+    const tracks = req.query.filename
+      ? await fetchSubtitlesByFilename(req.params.id, req.query.filename)
+      : await fetchSubtitles(req.params.id);
 
     // Return tracks with proxied URLs to avoid CORS issues
     const proxied = tracks.map((t) => ({

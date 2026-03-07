@@ -7,11 +7,25 @@ import db from '../db.js';
 const OPENSUBTITLES_V1 = 'https://rest.opensubtitles.org/search';
 const USER_AGENT = 'TemporaryUserAgent';
 
-// Cache: imdbId -> { tracks, expiry }
+// Cache: key -> { tracks, expiry }
 const cache = new Map();
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 const gunzip = promisify(zlib.gunzip);
+
+function deduplicateByLang(data) {
+  const byLang = new Map();
+  for (const item of data) {
+    const lang = item.ISO639 || 'unknown';
+    const score = parseFloat(item.Score) || 0;
+    const url = item.SubDownloadLink;
+    if (!url) continue;
+    if (!byLang.has(lang) || score > byLang.get(lang).score) {
+      byLang.set(lang, { language: lang, label: item.LanguageName || lang.toUpperCase(), url, score });
+    }
+  }
+  return [...byLang.values()].map(({ score, ...t }) => t);
+}
 
 /**
  * Fetch subtitle tracks for a movie from OpenSubtitles API v1 (free, no key needed).
@@ -40,24 +54,7 @@ export async function fetchSubtitles(movieId) {
     }
 
     // Deduplicate by language, keep highest Score
-    const byLang = new Map();
-    for (const item of data) {
-      const lang = item.ISO639 || 'unknown';
-      const score = parseFloat(item.Score) || 0;
-      const url = item.SubDownloadLink;
-      if (!url) continue;
-
-      if (!byLang.has(lang) || score > byLang.get(lang).score) {
-        byLang.set(lang, {
-          language: lang,
-          label: item.LanguageName || lang.toUpperCase(),
-          url,
-          score,
-        });
-      }
-    }
-
-    const tracks = [...byLang.values()].map(({ score, ...t }) => t);
+    const tracks = deduplicateByLang(data);
     cache.set(imdbId, { tracks, expiry: Date.now() + CACHE_TTL });
     console.log(`[subtitles] Found ${tracks.length} tracks for IMDB ${imdbId}`);
     return tracks;
@@ -66,6 +63,46 @@ export async function fetchSubtitles(movieId) {
     cache.set(imdbId, { tracks: [], expiry: Date.now() + CACHE_TTL });
     return [];
   }
+}
+
+/**
+ * Fetch subtitles by torrent filename (better sync for specific releases).
+ * Falls back to IMDB ID search if filename search returns nothing.
+ */
+export async function fetchSubtitlesByFilename(movieId, filename) {
+  if (!filename) return fetchSubtitles(movieId);
+
+  const cacheKey = `file:${filename}`;
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) return cached.tracks;
+
+  const movie = db.prepare('SELECT imdb_id FROM movies WHERE id = ?').get(movieId);
+  const numericId = movie?.imdb_id?.replace(/^tt/, '');
+
+  try {
+    // Search by filename + IMDB ID for best match
+    const searchPath = numericId
+      ? `/imdbid-${numericId}/tag-${encodeURIComponent(filename)}`
+      : `/tag-${encodeURIComponent(filename)}`;
+
+    const { data } = await axios.get(`${OPENSUBTITLES_V1}${searchPath}`, {
+      headers: { 'X-User-Agent': USER_AGENT },
+      timeout: 15000,
+    });
+
+    if (Array.isArray(data) && data.length > 0) {
+      const tracks = deduplicateByLang(data);
+      cache.set(cacheKey, { tracks, expiry: Date.now() + CACHE_TTL });
+      console.log(`[subtitles] Found ${tracks.length} tracks by filename: ${filename}`);
+      return tracks;
+    }
+  } catch (err) {
+    console.error('[subtitles] Filename search error:', err.message);
+  }
+
+  // Fallback to IMDB ID search
+  console.log(`[subtitles] No filename match, falling back to IMDB ID`);
+  return fetchSubtitles(movieId);
 }
 
 /**
