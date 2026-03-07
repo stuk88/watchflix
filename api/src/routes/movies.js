@@ -399,7 +399,11 @@ router.get('/:id/subtitles', async (req, res) => {
     const proxied = tracks.map((t) => ({
       language: t.language,
       label: t.label,
-      url: `/api/movies/${req.params.id}/subtitle-proxy?url=${encodeURIComponent(t.url)}`,
+      files: t.files.map(f => ({
+        filename: f.filename,
+        url: `/api/movies/${req.params.id}/subtitle-proxy?url=${encodeURIComponent(f.url)}`,
+        downloads: f.downloads,
+      })),
     }));
 
     res.json({ tracks: proxied });

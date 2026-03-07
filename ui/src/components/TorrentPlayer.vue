@@ -20,15 +20,34 @@
       <!-- Subtitle controls -->
       <div v-if="subtitleTracks.length" class="subtitle-bar">
         <span class="subtitle-label">CC:</span>
-        <button class="btn btn-sub" :class="{ active: currentSubtitle === null }" @click="selectSubtitle(null)">Off</button>
+        <button class="btn btn-sub" :class="{ active: currentSubtitle === null && !showSubPicker }" @click="selectSubtitleFile(null); showSubPicker = false;">Off</button>
         <button
           v-for="track in subtitleTracks"
           :key="track.language"
           class="btn btn-sub"
           :class="{ active: currentSubtitle === track.language }"
-          @click="selectSubtitle(track.language)"
-        >{{ track.label }}</button>
+          @click="toggleLangPicker(track.language)"
+        >{{ track.label }} <span v-if="track.files.length > 1" class="file-count">({{ track.files.length }})</span></button>
       </div>
+      <!-- Subtitle file picker (when language has multiple files) -->
+      <div v-if="showSubPicker && pickerFiles.length" class="sub-picker">
+        <div class="sub-picker-header">
+          <span>Choose subtitle file:</span>
+          <button class="btn btn-sub btn-close-picker" @click="showSubPicker = false">✕</button>
+        </div>
+        <button
+          v-for="(file, i) in pickerFiles"
+          :key="i"
+          class="btn btn-sub-file"
+          :class="{ active: activeSubUrl === file.url }"
+          @click="selectSubtitleFile(file)"
+        >
+          <span class="sub-filename">{{ file.filename }}</span>
+          <span class="sub-downloads">{{ file.downloads.toLocaleString() }} downloads</span>
+        </button>
+      </div>
+      <!-- Torrent filename -->
+      <div v-if="torrentFilename" class="torrent-filename">📁 {{ torrentFilename }}</div>
       <div class="torrent-info">
         <span>⬇ {{ downloadSpeed }}</span>
         <span>⬆ {{ uploadSpeed }}</span>
@@ -102,6 +121,10 @@ const streamUrl = computed(() => activeStreamUrl.value);
 const subtitleTracks = ref([]);
 const currentSubtitle = ref(null);
 const currentSubtitleText = ref('');
+const showSubPicker = ref(false);
+const pickerFiles = ref([]);
+const activeSubUrl = ref(null);
+const torrentFilename = ref('');
 let subtitleCues = [];
 let timeUpdateListener = null;
 
@@ -129,6 +152,7 @@ async function pollStats() {
       // Fetch subtitles by filename once available
       if (data.filename && !subtitlesFetched) {
         subtitlesFetched = true;
+        torrentFilename.value = data.filename;
         fetchSubtitlesForMovie(data.filename);
       }
     }
@@ -175,14 +199,39 @@ function clearSubtitleListener() {
   currentSubtitleText.value = '';
 }
 
-async function selectSubtitle(lang) {
-  currentSubtitle.value = lang;
-  clearSubtitleListener();
-  if (!lang) return;
+function toggleLangPicker(lang) {
   const track = subtitleTracks.value.find(t => t.language === lang);
   if (!track) return;
+
+  if (track.files.length === 1) {
+    // Single file — select immediately
+    currentSubtitle.value = lang;
+    showSubPicker.value = false;
+    selectSubtitleFile(track.files[0]);
+    return;
+  }
+
+  // Multiple files — show picker
+  currentSubtitle.value = lang;
+  pickerFiles.value = track.files;
+  showSubPicker.value = true;
+}
+
+async function selectSubtitleFile(file) {
+  clearSubtitleListener();
+
+  if (!file) {
+    currentSubtitle.value = null;
+    activeSubUrl.value = null;
+    showSubPicker.value = false;
+    return;
+  }
+
+  activeSubUrl.value = file.url;
+  showSubPicker.value = false;
+
   try {
-    const response = await fetch(track.url);
+    const response = await fetch(file.url);
     const vttText = await response.text();
     subtitleCues = parseVTT(vttText);
     timeUpdateListener = () => {
@@ -355,6 +404,68 @@ onUnmounted(() => {
   background: var(--accent, #77be41);
   color: #000;
   border-color: var(--accent, #77be41);
+}
+.file-count {
+  font-size: 10px;
+  opacity: 0.7;
+}
+.sub-picker {
+  background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 8px;
+  margin: 4px 0;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sub-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.btn-close-picker {
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+}
+.btn-sub-file {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-dim);
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+  transition: all 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.btn-sub-file:hover { background: rgba(255,255,255,0.08); }
+.btn-sub-file.active {
+  background: var(--accent, #77be41);
+  color: #000;
+  border-color: var(--accent, #77be41);
+}
+.btn-sub-file.active .sub-downloads { color: rgba(0,0,0,0.6); }
+.sub-filename {
+  word-break: break-all;
+}
+.sub-downloads {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.torrent-filename {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 0;
+  word-break: break-all;
 }
 .torrent-info {
   display: flex;
