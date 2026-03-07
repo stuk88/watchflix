@@ -10,22 +10,16 @@
         <div class="spinner"></div>
         <div class="loading-text">{{ loadingText }}</div>
       </div>
-      <video
-        v-show="!loading && !error"
-        ref="videoEl"
-        controls
-        autoplay
-        class="player-video"
-      >
-        <track
-          v-for="track in subtitleTracks"
-          :key="track.language"
-          kind="subtitles"
-          :label="track.label"
-          :srclang="track.language"
-          :src="track.url"
-        />
-      </video>
+      <div v-show="!loading && !error" class="video-wrap">
+        <video
+          ref="videoEl"
+          controls
+          autoplay
+          class="player-video"
+        ></video>
+        <!-- Custom subtitle overlay (works with hls.js which ignores <track> elements) -->
+        <div v-if="currentSubtitleText" class="subtitle-overlay" v-html="currentSubtitleText"></div>
+      </div>
       <!-- Subtitle controls (shown when subtitles are available) -->
       <div v-if="!loading && !error && subtitleTracks.length" class="subtitle-bar">
         <span class="subtitle-label">CC:</span>
@@ -92,8 +86,11 @@ const servers = ref([]);
 const currentServer = ref(2);
 const subtitleTracks = ref([]);
 const currentSubtitle = ref(null);
+const currentSubtitleText = ref('');
 
 let hls = null;
+let subtitleCues = [];
+let timeUpdateListener = null;
 
 async function startPlayer() {
   started.value = true;
@@ -180,25 +177,69 @@ async function fetchSubtitlesForMovie() {
   try {
     const { data } = await axios.get(`/api/movies/${props.movieId}/subtitles`);
     subtitleTracks.value = data.tracks || [];
-    // Default all tracks to hidden; user picks via selectSubtitle()
-    await nextTick();
-    if (videoEl.value) {
-      const tracks = videoEl.value.textTracks;
-      for (let i = 0; i < tracks.length; i++) {
-        tracks[i].mode = 'hidden';
-      }
-    }
   } catch (err) {
     console.error('[hls-player] Subtitle fetch error:', err.message);
   }
 }
 
-function selectSubtitle(lang) {
+// Parse WebVTT into cue objects { start, end, text }
+function parseVTT(vttText) {
+  const cues = [];
+  // Split into blocks separated by blank lines
+  const blocks = vttText.split(/\n{2,}/);
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    // Find the timestamp line
+    const tsIdx = lines.findIndex(l => l.includes('-->'));
+    if (tsIdx === -1) continue;
+    const [startStr, endStr] = lines[tsIdx].split('-->').map(s => s.trim());
+    const text = lines.slice(tsIdx + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+    if (!text) continue;
+    cues.push({ start: parseVTTTime(startStr), end: parseVTTTime(endStr), text });
+  }
+  return cues;
+}
+
+function parseVTTTime(str) {
+  // Handles HH:MM:SS.mmm and MM:SS.mmm
+  const parts = str.replace(',', '.').split(':');
+  if (parts.length === 3) {
+    return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
+  }
+  return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+}
+
+function clearSubtitleListener() {
+  if (timeUpdateListener && videoEl.value) {
+    videoEl.value.removeEventListener('timeupdate', timeUpdateListener);
+    timeUpdateListener = null;
+  }
+  subtitleCues = [];
+  currentSubtitleText.value = '';
+}
+
+async function selectSubtitle(lang) {
   currentSubtitle.value = lang;
-  if (!videoEl.value) return;
-  const tracks = videoEl.value.textTracks;
-  for (let i = 0; i < tracks.length; i++) {
-    tracks[i].mode = tracks[i].language === lang ? 'showing' : 'hidden';
+  clearSubtitleListener();
+
+  if (!lang) return;
+
+  const track = subtitleTracks.value.find(t => t.language === lang);
+  if (!track) return;
+
+  try {
+    const response = await fetch(track.url);
+    const vttText = await response.text();
+    subtitleCues = parseVTT(vttText);
+
+    timeUpdateListener = () => {
+      const time = videoEl.value?.currentTime ?? 0;
+      const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
+      currentSubtitleText.value = cue ? cue.text : '';
+    };
+    videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+  } catch (err) {
+    console.error('[subtitles] Failed to load VTT:', err);
   }
 }
 
@@ -206,6 +247,7 @@ async function switchServer(serverId) {
   currentServer.value = serverId;
   subtitleTracks.value = [];
   currentSubtitle.value = null;
+  clearSubtitleListener();
   if (hls) {
     hls.destroy();
     hls = null;
@@ -214,6 +256,7 @@ async function switchServer(serverId) {
 }
 
 onUnmounted(() => {
+  clearSubtitleListener();
   if (hls) {
     hls.destroy();
     hls = null;
@@ -276,10 +319,30 @@ onUnmounted(() => {
   font-size: 14px;
   color: var(--text-muted);
 }
+.video-wrap {
+  position: relative;
+}
 .player-video {
   width: 100%;
   border-radius: 8px;
   background: #000;
+}
+.subtitle-overlay {
+  position: absolute;
+  bottom: 60px; /* above the video controls bar */
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  text-align: center;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.4;
+  text-shadow: 0 0 4px #000, 0 1px 3px #000;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 4px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: pre-line;
 }
 .error-state {
   padding: 24px;
