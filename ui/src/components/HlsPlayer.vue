@@ -10,16 +10,13 @@
         <div class="spinner"></div>
         <div class="loading-text">{{ loadingText }}</div>
       </div>
-      <div v-show="!loading && !error" class="video-wrap" ref="videoWrap">
+      <div v-show="!loading && !error" class="video-wrap">
         <video
           ref="videoEl"
           controls
           autoplay
           class="player-video"
-          @dblclick="toggleFullscreen"
         ></video>
-        <!-- Custom subtitle overlay (works with hls.js which ignores <track> elements) -->
-        <div v-if="currentSubtitleText" class="subtitle-overlay" v-html="currentSubtitleText"></div>
       </div>
       <!-- Subtitle controls (shown when subtitles are available, even while stream is loading) -->
       <div v-if="!error && subtitleTracks.length" class="subtitle-bar">
@@ -99,7 +96,7 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, onMounted, nextTick } from 'vue';
+import { ref, onUnmounted, nextTick, watch } from 'vue';
 import axios from 'axios';
 
 const props = defineProps({
@@ -111,12 +108,10 @@ const loading = ref(false);
 const loadingText = ref('Extracting stream...');
 const error = ref(null);
 const videoEl = ref(null);
-const videoWrap = ref(null);
 const servers = ref([]);
 const currentServer = ref(2);
 const subtitleTracks = ref([]);
 const currentSubtitle = ref(null);
-const currentSubtitleText = ref('');
 const showSubPicker = ref(false);
 const pickerFiles = ref([]);
 const activeSubUrl = ref(null);
@@ -125,7 +120,7 @@ const syncing = ref(false);
 
 let hls = null;
 let subtitleCues = [];
-let timeUpdateListener = null;
+let activeTrack = null;
 
 async function startPlayer() {
   started.value = true;
@@ -243,13 +238,12 @@ function parseVTTTime(str) {
   return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
 }
 
-function clearSubtitleListener() {
-  if (timeUpdateListener && videoEl.value) {
-    videoEl.value.removeEventListener('timeupdate', timeUpdateListener);
-    timeUpdateListener = null;
+function clearSubtitleTrack() {
+  if (activeTrack) {
+    activeTrack.mode = 'disabled';
+    activeTrack = null;
   }
   subtitleCues = [];
-  currentSubtitleText.value = '';
 }
 
 function toggleLangPicker(lang) {
@@ -269,7 +263,7 @@ function toggleLangPicker(lang) {
 }
 
 async function selectSubtitleFile(file) {
-  clearSubtitleListener();
+  clearSubtitleTrack();
   subOffset.value = 0;
 
   if (!file) {
@@ -286,13 +280,12 @@ async function selectSubtitleFile(file) {
     const response = await fetch(file.url);
     const vttText = await response.text();
     subtitleCues = parseVTT(vttText);
-
-    timeUpdateListener = () => {
-      const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
-      const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
-      currentSubtitleText.value = cue ? cue.text : '';
-    };
-    videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+    const track = videoEl.value.addTextTrack('subtitles', 'English', 'en');
+    track.mode = 'showing';
+    for (const cue of subtitleCues) {
+      track.addCue(new VTTCue(cue.start - subOffset.value, cue.end - subOffset.value, cue.text));
+    }
+    activeTrack = track;
   } catch (err) {
     console.error('[subtitles] Failed to load VTT:', err);
   }
@@ -301,6 +294,17 @@ async function selectSubtitleFile(file) {
 function adjustOffset(delta) {
   subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
 }
+
+watch(subOffset, () => {
+  if (activeTrack && subtitleCues.length) {
+    while (activeTrack.cues.length) {
+      activeTrack.removeCue(activeTrack.cues[0]);
+    }
+    for (const cue of subtitleCues) {
+      activeTrack.addCue(new VTTCue(cue.start - subOffset.value, cue.end - subOffset.value, cue.text));
+    }
+  }
+});
 
 async function autoSync() {
   if (!activeSubUrl.value || syncing.value) return;
@@ -312,14 +316,14 @@ async function autoSync() {
       subtitleUrl: activeSubUrl.value,
     }, { responseType: 'text', timeout: 130000 });
 
-    clearSubtitleListener();
+    clearSubtitleTrack();
     subtitleCues = parseVTT(syncedVtt);
-    timeUpdateListener = () => {
-      const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
-      const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
-      currentSubtitleText.value = cue ? cue.text : '';
-    };
-    videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+    const track = videoEl.value.addTextTrack('subtitles', 'English', 'en');
+    track.mode = 'showing';
+    for (const cue of subtitleCues) {
+      track.addCue(new VTTCue(cue.start - subOffset.value, cue.end - subOffset.value, cue.text));
+    }
+    activeTrack = track;
   } catch (err) {
     console.error('[auto-sync] Failed:', err);
     alert('Auto sync failed: ' + (err.response?.data?.error || err.message));
@@ -332,7 +336,7 @@ async function switchServer(serverId) {
   currentServer.value = serverId;
   subtitleTracks.value = [];
   currentSubtitle.value = null;
-  clearSubtitleListener();
+  clearSubtitleTrack();
   if (hls) {
     hls.destroy();
     hls = null;
@@ -340,30 +344,8 @@ async function switchServer(serverId) {
   await loadStream(serverId);
 }
 
-function toggleFullscreen() {
-  if (document.fullscreenElement) {
-    document.exitFullscreen();
-  } else if (videoWrap.value) {
-    videoWrap.value.requestFullscreen();
-  }
-}
-
-onMounted(() => {
-  const handleFullscreen = () => {
-    if (document.fullscreenElement === videoEl.value && videoWrap.value) {
-      document.exitFullscreen().then(() => {
-        videoWrap.value.requestFullscreen();
-      }).catch(() => {});
-    }
-  };
-  document.addEventListener('fullscreenchange', handleFullscreen);
-  onUnmounted(() => {
-    document.removeEventListener('fullscreenchange', handleFullscreen);
-  });
-});
-
 onUnmounted(() => {
-  clearSubtitleListener();
+  clearSubtitleTrack();
   if (hls) {
     hls.destroy();
     hls = null;
@@ -429,40 +411,10 @@ onUnmounted(() => {
 .video-wrap {
   position: relative;
 }
-.video-wrap:fullscreen {
-  background: #000;
-}
-.video-wrap:fullscreen .player-video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border-radius: 0;
-}
-.video-wrap:fullscreen .subtitle-overlay {
-  font-size: 24px;
-  bottom: 80px;
-}
 .player-video {
   width: 100%;
   border-radius: 8px;
   background: #000;
-}
-.subtitle-overlay {
-  position: absolute;
-  bottom: 60px; /* above the video controls bar */
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 80%;
-  text-align: center;
-  color: #fff;
-  font-size: 16px;
-  line-height: 1.4;
-  text-shadow: 0 0 4px #000, 0 1px 3px #000;
-  background: rgba(0, 0, 0, 0.55);
-  padding: 4px 10px;
-  border-radius: 4px;
-  pointer-events: none;
-  white-space: pre-line;
 }
 .error-state {
   padding: 24px;

@@ -61,7 +61,7 @@ async function extractTmdbFrom123(sourceUrl) {
 
     await page.route('**/*', async (route) => {
       const url = route.request().url();
-      const match = url.match(/(?:embos\.net|vsembed\.ru|vidnest\.fun)\/(?:movie|embed\/movie)\/?\??(?:mid=)?(\d{3,})/);
+      const match = url.match(/(?:embos\.net|vsembed\.ru|(?:new\.)?vidnest\.fun)\/(?:movie|embed\/movie)\/?\??(?:mid=)?(\d{3,})/);
       if (match && !tmdbId) {
         tmdbId = match[1];
         console.log(`[extractor] Found TMDB ID: ${tmdbId}`);
@@ -88,8 +88,12 @@ async function extractTmdbFrom123(sourceUrl) {
 }
 
 /**
- * Extract HLS stream URL via vidnest.fun (the final player).
- * Flow: IMDB ID → TMDB ID → vidnest.fun/movie/{tmdb_id} → intercept m3u8
+ * Extract HLS stream URL via embos.net (the 123movies embed hub).
+ * Flow: IMDB ID → TMDB ID → embos.net/movie/?mid={tmdb_id} → click server tab → intercept m3u8
+ *
+ * embos.net hosts multiple server tabs (data-id: 1, 2, 5), each loading a different
+ * embed provider in an iframe. We click the requested server tab and intercept the
+ * resulting m3u8 URL from network traffic.
  */
 export async function extractStreamUrl(movieId, server = 2) {
   const cacheKey = `${movieId}:${server}`;
@@ -103,15 +107,15 @@ export async function extractStreamUrl(movieId, server = 2) {
   const tmdbId = await getTmdbId(movie.imdb_id, movie.source_url);
   if (!tmdbId) throw new Error('Could not resolve TMDB ID for ' + movie.title);
 
-  console.log(`[extractor] Streaming ${movie.title} (TMDB: ${tmdbId})`);
+  console.log(`[extractor] Streaming ${movie.title} (TMDB: ${tmdbId}, server: ${server})`);
 
-  // Step 2: Load vidnest.fun directly and intercept m3u8
+  // Step 2: Load embos.net and select the requested server tab, then intercept m3u8
   let browser;
   try {
     browser = await chromium.launch({
       executablePath: BROWSER_PATH,
       headless: true,
-      args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'],
+      args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-features=IsolateOrigins,site-per-process'],
     });
 
     const ctx = await browser.newContext({
@@ -123,12 +127,13 @@ export async function extractStreamUrl(movieId, server = 2) {
     let m3u8Url = null;
     let subtitleUrl = null;
 
+    // Intercept request URLs for direct .m3u8 hits across all frames
     await page.route('**/*', async (route) => {
       const url = route.request().url();
-      if (url.includes('.m3u8') || (url.includes('/hls/') && !url.includes('.js'))) {
+      if ((url.includes('.m3u8') || (url.includes('/hls/') && !url.includes('.js'))) && url.startsWith('http')) {
         if (!m3u8Url || url.includes('index.m3u8') || url.includes('master')) {
           m3u8Url = url;
-          console.log(`[extractor] ✅ m3u8: ${url.substring(0, 100)}...`);
+          console.log(`[extractor] ✅ m3u8 (route): ${url.substring(0, 120)}`);
         }
       }
       if (url.includes('.vtt') || url.includes('/sub/') || url.includes('/captions/')) {
@@ -137,20 +142,53 @@ export async function extractStreamUrl(movieId, server = 2) {
       await route.continue();
     });
 
-    await page.goto(`https://vidnest.fun/movie/${tmdbId}`, {
-      waitUntil: 'load',
-      timeout: 25000,
-      referer: 'https://vsembed.ru/',
+    // Also scan response bodies for m3u8 URLs (some providers embed them in JSON/JS)
+    page.on('response', async (response) => {
+      if (m3u8Url) return;
+      const url = response.url();
+      const ct = response.headers()['content-type'] || '';
+      if (ct.includes('json') || ct.includes('javascript') || url.includes('/api/') || url.includes('/decrypt')) {
+        try {
+          const text = await response.text();
+          const m3u8Match = text.match(/https?:\/\/[^\s"'\\]+\.m3u8[^\s"'\\]*/);
+          if (m3u8Match) {
+            m3u8Url = m3u8Match[0];
+            console.log(`[extractor] ✅ m3u8 (response body): ${m3u8Url.substring(0, 120)}`);
+          }
+          if (!subtitleUrl) {
+            const vttMatch = text.match(/https?:\/\/[^\s"'\\]+\.vtt[^\s"'\\]*/);
+            if (vttMatch) subtitleUrl = vttMatch[0];
+          }
+        } catch (_) {}
+      }
     });
 
-    // Wait for m3u8 (usually appears within 5-10s)
-    for (let i = 0; i < 20 && !m3u8Url; i++) {
+    const embosUrl = `https://embos.net/movie/?mid=${tmdbId}`;
+    await page.goto(embosUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+      referer: movie.source_url || 'https://123movies.ai/',
+    });
+
+    // Give the page a moment to render server tabs
+    await page.waitForTimeout(1500);
+
+    // Click the server tab matching the requested server (data-id attribute)
+    const tabClicked = await page.click(`[data-id="${server}"]`, { timeout: 5000 }).then(() => true).catch(() => false);
+    if (tabClicked) {
+      console.log(`[extractor] Clicked server tab data-id="${server}"`);
+    } else {
+      console.warn(`[extractor] Server tab data-id="${server}" not found, using default`);
+    }
+
+    // Wait for m3u8 interception (up to 25s)
+    for (let i = 0; i < 25 && !m3u8Url; i++) {
       await page.waitForTimeout(1000);
     }
 
     await browser.close();
 
-    if (!m3u8Url) throw new Error('Could not extract stream URL from vidnest');
+    if (!m3u8Url) throw new Error(`Could not extract stream URL from embos.net (server ${server})`);
 
     const result = { m3u8: m3u8Url, subtitles: subtitleUrl, tmdbId, expiry: Date.now() + CACHE_TTL };
     cache.set(cacheKey, result);

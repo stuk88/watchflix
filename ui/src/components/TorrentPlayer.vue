@@ -6,7 +6,7 @@
       <div class="start-quality" v-if="quality">{{ quality }}</div>
     </div>
     <div v-else>
-      <div class="video-wrap" ref="videoWrap">
+      <div class="video-wrap">
         <video
           ref="videoEl"
           controls
@@ -14,9 +14,7 @@
           class="player-video"
           :src="streamUrl"
           @error="onVideoError"
-          @dblclick="toggleFullscreen"
         ></video>
-        <div v-if="currentSubtitleText" class="subtitle-overlay" v-html="currentSubtitleText"></div>
       </div>
       <!-- Subtitle controls -->
       <div v-if="subtitleTracks.length" class="subtitle-bar">
@@ -102,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, onMounted, computed } from 'vue';
+import { ref, onUnmounted, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from 'axios';
 
@@ -115,7 +113,6 @@ const props = defineProps({
 const router = useRouter();
 const started = ref(false);
 const videoEl = ref(null);
-const videoWrap = ref(null);
 const downloadSpeed = ref('0 KB/s');
 const uploadSpeed = ref('0 KB/s');
 const peerCount = ref(0);
@@ -137,7 +134,6 @@ const streamUrl = computed(() => activeStreamUrl.value);
 
 const subtitleTracks = ref([]);
 const currentSubtitle = ref(null);
-const currentSubtitleText = ref('');
 const showSubPicker = ref(false);
 const pickerFiles = ref([]);
 const activeSubUrl = ref(null);
@@ -146,7 +142,7 @@ const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
 let subtitleCues = [];
-let timeUpdateListener = null;
+let activeTrack = null;
 
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -235,13 +231,12 @@ function parseVTTTime(str) {
   return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
 }
 
-function clearSubtitleListener() {
-  if (timeUpdateListener && videoEl.value) {
-    videoEl.value.removeEventListener('timeupdate', timeUpdateListener);
-    timeUpdateListener = null;
+function clearSubtitleTrack() {
+  if (activeTrack) {
+    activeTrack.mode = 'disabled';
+    activeTrack = null;
   }
   subtitleCues = [];
-  currentSubtitleText.value = '';
 }
 
 function toggleLangPicker(lang) {
@@ -263,7 +258,7 @@ function toggleLangPicker(lang) {
 }
 
 async function selectSubtitleFile(file) {
-  clearSubtitleListener();
+  clearSubtitleTrack();
   subOffset.value = 0;
 
   if (!file) {
@@ -280,12 +275,12 @@ async function selectSubtitleFile(file) {
     const response = await fetch(file.url);
     const vttText = await response.text();
     subtitleCues = parseVTT(vttText);
-    timeUpdateListener = () => {
-      const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
-      const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
-      currentSubtitleText.value = cue ? cue.text : '';
-    };
-    videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+    const track = videoEl.value.addTextTrack('subtitles', 'English', 'en');
+    track.mode = 'showing';
+    for (const cue of subtitleCues) {
+      track.addCue(new VTTCue(cue.start - subOffset.value, cue.end - subOffset.value, cue.text));
+    }
+    activeTrack = track;
   } catch (err) {
     console.error('[subtitles] Failed to load VTT:', err);
   }
@@ -294,6 +289,17 @@ async function selectSubtitleFile(file) {
 function adjustOffset(delta) {
   subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
 }
+
+watch(subOffset, () => {
+  if (activeTrack && subtitleCues.length) {
+    while (activeTrack.cues.length) {
+      activeTrack.removeCue(activeTrack.cues[0]);
+    }
+    for (const cue of subtitleCues) {
+      activeTrack.addCue(new VTTCue(cue.start - subOffset.value, cue.end - subOffset.value, cue.text));
+    }
+  }
+});
 
 async function autoSync() {
   if (!activeSubUrl.value || syncing.value) return;
@@ -315,12 +321,12 @@ async function autoSync() {
     const { data } = await axios.post(`/api/movies/${props.movieId}/whisper-sync`, {
       currentTime,
       subtitleCues: cueWindow,
+      subtitleLanguage: currentSubtitle.value ? subtitleTracks.value.find(t => t.language === currentSubtitle.value)?.label : 'English',
     }, { timeout: 120000 });
 
     subOffset.value = Math.round(data.offset * 10) / 10;
     const pct = Math.round(data.confidence * 100);
     syncStatus.value = `Synced: ${subOffset.value >= 0 ? '+' : ''}${subOffset.value.toFixed(1)}s (${pct}% confidence)`;
-    // Clear status after 5 seconds
     setTimeout(() => { syncStatus.value = ''; }, 5000);
   } catch (err) {
     console.error('[whisper-sync] Failed:', err);
@@ -417,42 +423,8 @@ async function removeMovie() {
   router.push('/');
 }
 
-function toggleFullscreen() {
-  if (document.fullscreenElement) {
-    document.exitFullscreen();
-  } else if (videoWrap.value) {
-    videoWrap.value.requestFullscreen();
-  }
-}
-
-// Intercept native fullscreen from video controls to fullscreen the wrapper instead
-onMounted(() => {
-  // Listen for the video element trying to go fullscreen
-  const observer = new MutationObserver(() => {
-    if (document.fullscreenElement === videoEl.value && videoWrap.value) {
-      document.exitFullscreen().then(() => {
-        videoWrap.value.requestFullscreen();
-      }).catch(() => {});
-    }
-  });
-
-  // Use fullscreenchange to intercept
-  const handleFullscreen = () => {
-    if (document.fullscreenElement === videoEl.value && videoWrap.value) {
-      document.exitFullscreen().then(() => {
-        videoWrap.value.requestFullscreen();
-      }).catch(() => {});
-    }
-  };
-  document.addEventListener('fullscreenchange', handleFullscreen);
-
-  onUnmounted(() => {
-    document.removeEventListener('fullscreenchange', handleFullscreen);
-  });
-});
-
 onUnmounted(() => {
-  clearSubtitleListener();
+  clearSubtitleTrack();
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
 });
@@ -496,36 +468,6 @@ onUnmounted(() => {
 }
 .video-wrap {
   position: relative;
-}
-.video-wrap:fullscreen {
-  background: #000;
-}
-.video-wrap:fullscreen .player-video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  border-radius: 0;
-}
-.video-wrap:fullscreen .subtitle-overlay {
-  font-size: 24px;
-  bottom: 80px;
-}
-.subtitle-overlay {
-  position: absolute;
-  bottom: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 80%;
-  text-align: center;
-  color: #fff;
-  font-size: 16px;
-  line-height: 1.4;
-  text-shadow: 0 0 4px #000, 0 1px 3px #000;
-  background: rgba(0, 0, 0, 0.55);
-  padding: 4px 10px;
-  border-radius: 4px;
-  pointer-events: none;
-  white-space: pre-line;
 }
 .subtitle-bar {
   display: flex;

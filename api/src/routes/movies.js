@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import axios from 'axios';
 import db from '../db.js';
+import config from '../config.js';
 import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats } from '../services/streamer.js';
 import { extractStreamUrl, getAvailableServers } from '../services/stream-extractor.js';
@@ -423,7 +424,7 @@ router.post('/:id/subtitle-sync', async (req, res) => {
 
 // Whisper-based smart subtitle sync: extract audio snippet, transcribe, fuzzy-match subtitle cues
 router.post('/:id/whisper-sync', async (req, res) => {
-  const { currentTime, subtitleCues } = req.body;
+  const { currentTime, subtitleCues, subtitleLanguage } = req.body;
 
   if (typeof currentTime !== 'number') {
     return res.status(400).json({ error: 'Missing or invalid currentTime' });
@@ -443,8 +444,8 @@ router.post('/:id/whisper-sync', async (req, res) => {
   const audioWav = path.join(tmpDir, `whisper_chunk_${chunkId}.wav`);
   const whisperJsonFile = path.join(tmpDir, `whisper_chunk_${chunkId}.json`);
 
-  const startTime = Math.max(0, currentTime - 5);
-  const audioDuration = 20;
+  const startTime = Math.max(0, currentTime - 30);
+  const audioDuration = 60;
 
   try {
     const baseUrl = `http://localhost:${process.env.PORT || 3001}`;
@@ -465,14 +466,13 @@ router.post('/:id/whisper-sync', async (req, res) => {
       audioWav,
     ], { timeout: 60000 });
 
-    console.log('[whisper-sync] Running Whisper transcription...');
+    console.log('[whisper-sync] Running Whisper transcription (1 minute chunk)...');
     await execFileAsync(whisperPath, [
       audioWav,
       '--model', 'base',
-      '--language', 'en',
       '--output_format', 'json',
       '--output_dir', tmpDir,
-    ], { timeout: 90000 });
+    ], { timeout: 120000 });
 
     if (!fs.existsSync(whisperJsonFile)) {
       throw new Error('Whisper did not produce output JSON');
@@ -480,17 +480,69 @@ router.post('/:id/whisper-sync', async (req, res) => {
 
     const whisperResult = JSON.parse(fs.readFileSync(whisperJsonFile, 'utf-8'));
     const whisperSegments = whisperResult.segments || [];
+    const detectedLanguage = whisperResult.language || 'en';
 
     if (whisperSegments.length === 0) {
       return res.status(422).json({ error: 'No speech detected in audio snippet' });
     }
 
-    // Normalize text for fuzzy matching: lowercase, remove punctuation
-    function normalizeText(text) {
-      return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    // Combine all whisper segments into one transcript with timestamps
+    const whisperTranscript = whisperSegments.map(s => ({
+      start: s.start,
+      end: s.end,
+      text: s.text.trim(),
+    }));
+
+    const fullWhisperText = whisperTranscript.map(s => s.text).join(' ');
+    console.log(`[whisper-sync] Detected language: ${detectedLanguage}, transcript: "${fullWhisperText.substring(0, 100)}..."`);
+
+    // If subtitle language differs from detected spoken language, translate via GPT
+    const subLang = (subtitleLanguage || 'en').toLowerCase();
+    const needsTranslation = detectedLanguage !== subLang && detectedLanguage !== 'en' && subLang !== detectedLanguage;
+    
+    let matchSegments = whisperTranscript;
+    
+    if (needsTranslation && config.openaiApiKey) {
+      console.log(`[whisper-sync] Translating from ${detectedLanguage} to ${subLang} via GPT...`);
+      try {
+        const { default: axios } = await import('axios');
+        const gptResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
+          model: 'gpt-4o-mini',
+          messages: [{
+            role: 'system',
+            content: `Translate the following transcript segments to ${subtitleLanguage || 'English'}. Return a JSON array of objects with "start", "end", "text" fields. Keep the start/end times exactly as given. Only translate the text field. Return ONLY the JSON array, no markdown.`
+          }, {
+            role: 'user',
+            content: JSON.stringify(whisperTranscript)
+          }],
+          temperature: 0.1,
+        }, {
+          headers: {
+            'Authorization': `Bearer ${config.openaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 30000,
+        });
+
+        const gptText = gptResponse.data.choices[0].message.content.trim();
+        // Parse JSON, strip markdown code fences if present
+        const cleanJson = gptText.replace(/^```json?\n?/m, '').replace(/\n?```$/m, '');
+        const translated = JSON.parse(cleanJson);
+        if (Array.isArray(translated) && translated.length > 0) {
+          matchSegments = translated;
+          console.log(`[whisper-sync] Translated ${translated.length} segments`);
+        }
+      } catch (translateErr) {
+        console.error('[whisper-sync] Translation failed, matching with original:', translateErr.message);
+        // Fall back to original whisper text
+      }
     }
 
-    // Word overlap ratio between two normalized strings
+    // Normalize text for fuzzy matching
+    function normalizeText(text) {
+      return text.toLowerCase().replace(/[^a-z0-9\s\u0080-\uffff]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
     function wordOverlapScore(a, b) {
       const wordsA = a.split(' ').filter(Boolean);
       const wordsB = new Set(b.split(' ').filter(Boolean));
@@ -499,41 +551,46 @@ router.post('/:id/whisper-sync', async (req, res) => {
       return overlap / Math.max(wordsA.length, wordsB.size);
     }
 
-    // Find best-matching (whisperSegment, subtitleCue) pair
+    // Find best-matching (segment, subtitleCue) pair
     let bestScore = 0;
-    let bestWhisperSegment = null;
+    let bestSegment = null;
     let bestSubCue = null;
 
-    for (const seg of whisperSegments) {
+    for (const seg of matchSegments) {
       const normSeg = normalizeText(seg.text);
       for (const cue of subtitleCues) {
         const normCue = normalizeText(cue.text);
         const score = wordOverlapScore(normSeg, normCue);
         if (score > bestScore) {
           bestScore = score;
-          bestWhisperSegment = seg;
+          bestSegment = seg;
           bestSubCue = cue;
         }
       }
     }
 
-    if (!bestWhisperSegment || bestScore < 0.3) {
-      return res.status(422).json({ error: 'No subtitle match found (best score: ' + bestScore.toFixed(2) + ')' });
+    if (!bestSegment || bestScore < 0.2) {
+      return res.status(422).json({ 
+        error: `No subtitle match found (best score: ${bestScore.toFixed(2)})`,
+        whisperText: fullWhisperText.substring(0, 200),
+        detectedLanguage,
+      });
     }
 
-    // Whisper timestamps are relative to the start of the audio chunk
-    // chunk started at video time `startTime`
-    const spokenAtVideoTime = startTime + bestWhisperSegment.start;
+    // Calculate offset
+    const spokenAtVideoTime = startTime + bestSegment.start;
     const offset = spokenAtVideoTime - bestSubCue.start;
 
-    console.log(`[whisper-sync] Match: "${bestWhisperSegment.text.trim()}" → "${bestSubCue.text}" | offset=${offset.toFixed(2)}s confidence=${bestScore.toFixed(2)}`);
+    console.log(`[whisper-sync] Match: "${bestSegment.text}" → "${bestSubCue.text}" | offset=${offset.toFixed(2)}s confidence=${bestScore.toFixed(2)}`);
 
     res.json({
       offset: Math.round(offset * 10) / 10,
       confidence: Math.round(bestScore * 100) / 100,
-      whisperText: bestWhisperSegment.text.trim(),
+      whisperText: fullWhisperText.substring(0, 200),
       matchedCue: bestSubCue.text,
       matchedCueTime: bestSubCue.start,
+      detectedLanguage,
+      translated: needsTranslation,
     });
   } catch (err) {
     console.error('[whisper-sync] Error:', err.message);
