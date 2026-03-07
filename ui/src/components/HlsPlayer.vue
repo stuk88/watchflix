@@ -54,9 +54,12 @@
       </div>
       <!-- Subtitle sync controls -->
       <div v-if="activeSubUrl" class="sync-bar">
+        <button class="btn btn-sync btn-auto-sync" @click="autoSync" :disabled="syncing">
+          {{ syncing ? '⏳ Syncing...' : '🔄 Auto Sync' }}
+        </button>
         <button class="btn btn-sync" @click="adjustOffset(-5)">-5s</button>
         <button class="btn btn-sync" @click="adjustOffset(-0.5)">-0.5s</button>
-        <span class="sync-label">Sync: {{ subOffset >= 0 ? '+' : '' }}{{ subOffset.toFixed(1) }}s</span>
+        <span class="sync-label">{{ subOffset >= 0 ? '+' : '' }}{{ subOffset.toFixed(1) }}s</span>
         <button class="btn btn-sync" @click="adjustOffset(0.5)">+0.5s</button>
         <button class="btn btn-sync" @click="adjustOffset(5)">+5s</button>
         <button class="btn btn-sync btn-sync-reset" @click="adjustOffset(-subOffset)">Reset</button>
@@ -116,6 +119,7 @@ const showSubPicker = ref(false);
 const pickerFiles = ref([]);
 const activeSubUrl = ref(null);
 const subOffset = ref(0);
+const syncing = ref(false);
 
 let hls = null;
 let subtitleCues = [];
@@ -294,6 +298,32 @@ async function selectSubtitleFile(file) {
 
 function adjustOffset(delta) {
   subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
+}
+
+async function autoSync() {
+  if (!activeSubUrl.value || syncing.value) return;
+  syncing.value = true;
+  subOffset.value = 0;
+
+  try {
+    const { data: syncedVtt } = await axios.post(`/api/movies/${props.movieId}/subtitle-sync`, {
+      subtitleUrl: activeSubUrl.value,
+    }, { responseType: 'text', timeout: 130000 });
+
+    clearSubtitleListener();
+    subtitleCues = parseVTT(syncedVtt);
+    timeUpdateListener = () => {
+      const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
+      const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
+      currentSubtitleText.value = cue ? cue.text : '';
+    };
+    videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+  } catch (err) {
+    console.error('[auto-sync] Failed:', err);
+    alert('Auto sync failed: ' + (err.response?.data?.error || err.message));
+  } finally {
+    syncing.value = false;
+  }
 }
 
 async function switchServer(serverId) {
@@ -569,6 +599,13 @@ onUnmounted(() => {
   transition: all 0.15s;
 }
 .btn-sync:hover { background: rgba(255,255,255,0.1); }
+.btn-auto-sync {
+  background: rgba(119,190,65,0.15);
+  border-color: rgba(119,190,65,0.3);
+  color: var(--accent, #77be41);
+}
+.btn-auto-sync:hover { background: rgba(119,190,65,0.25); }
+.btn-auto-sync:disabled { opacity: 0.6; cursor: wait; }
 .btn-sync-reset {
   margin-left: 4px;
   color: var(--text-muted);

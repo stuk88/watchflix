@@ -5,6 +5,13 @@ import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats } from '../services/streamer.js';
 import { extractStreamUrl, getAvailableServers } from '../services/stream-extractor.js';
 import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+const execFileAsync = promisify(execFile);
 
 const router = Router();
 
@@ -337,6 +344,62 @@ router.get('/:id/torrent-subtitle/:index', async (req, res) => {
   } catch (err) {
     console.error('[torrent-subtitle] Error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Auto-sync subtitle against video audio using ffsubsync
+router.post('/:id/subtitle-sync', async (req, res) => {
+  const { subtitleUrl } = req.body;
+  if (!subtitleUrl) return res.status(400).json({ error: 'Missing subtitleUrl' });
+
+  const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie?.torrent_magnet) return res.status(400).json({ error: 'No torrent for this movie' });
+
+  const tmpDir = os.tmpdir();
+  const subIn = path.join(tmpDir, `sub_in_${req.params.id}_${Date.now()}.srt`);
+  const subOut = path.join(tmpDir, `sub_out_${req.params.id}_${Date.now()}.srt`);
+
+  try {
+    // Fetch the subtitle content
+    const baseUrl = `http://localhost:${process.env.PORT || 3001}`;
+    const subUrl = subtitleUrl.startsWith('/') ? `${baseUrl}${subtitleUrl}` : subtitleUrl;
+    const { data: vttText } = await (await import('axios')).default.get(subUrl, { responseType: 'text' });
+
+    // ffsubsync works with SRT, convert VTT back to SRT-ish (just write as-is, ffsubsync handles both)
+    fs.writeFileSync(subIn, vttText, 'utf-8');
+
+    // Run ffsubsync against the video stream URL
+    const videoUrl = `${baseUrl}/api/movies/${req.params.id}/stream`;
+    const ffsubsyncPath = process.env.FFSUBSYNC_PATH || `${os.homedir()}/.local/bin/ffsubsync`;
+
+    const { stdout, stderr } = await execFileAsync(ffsubsyncPath, [
+      videoUrl,
+      '-i', subIn,
+      '-o', subOut,
+      '--max-offset-seconds', '120',
+      '--vad', 'webrtc',
+    ], { timeout: 120000 });
+
+    console.log('[subtitle-sync] ffsubsync output:', stderr || stdout);
+
+    if (!fs.existsSync(subOut)) {
+      throw new Error('ffsubsync did not produce output');
+    }
+
+    const syncedText = fs.readFileSync(subOut, 'utf-8');
+    const syncedVtt = syncedText.trimStart().startsWith('WEBVTT') ? syncedText : srtToVtt(syncedText);
+
+    // Clean up temp files
+    try { fs.unlinkSync(subIn); } catch {}
+    try { fs.unlinkSync(subOut); } catch {}
+
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.send(syncedVtt);
+  } catch (err) {
+    console.error('[subtitle-sync] Error:', err.message);
+    try { fs.unlinkSync(subIn); } catch {}
+    try { fs.unlinkSync(subOut); } catch {}
+    res.status(500).json({ error: `Sync failed: ${err.message}` });
   }
 });
 
