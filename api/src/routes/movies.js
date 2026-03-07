@@ -421,6 +421,129 @@ router.post('/:id/subtitle-sync', async (req, res) => {
   }
 });
 
+// Whisper-based smart subtitle sync: extract audio snippet, transcribe, fuzzy-match subtitle cues
+router.post('/:id/whisper-sync', async (req, res) => {
+  const { currentTime, subtitleCues } = req.body;
+
+  if (typeof currentTime !== 'number') {
+    return res.status(400).json({ error: 'Missing or invalid currentTime' });
+  }
+  if (!Array.isArray(subtitleCues) || subtitleCues.length === 0) {
+    return res.status(400).json({ error: 'Missing or empty subtitleCues' });
+  }
+  if (currentTime < 10) {
+    return res.status(400).json({ error: 'currentTime too early (< 10s) — not enough audio context' });
+  }
+
+  const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie?.torrent_magnet) return res.status(400).json({ error: 'No torrent for this movie' });
+
+  const tmpDir = os.tmpdir();
+  const chunkId = `${req.params.id}_${Date.now()}`;
+  const audioWav = path.join(tmpDir, `whisper_chunk_${chunkId}.wav`);
+  const whisperJsonFile = path.join(tmpDir, `whisper_chunk_${chunkId}.json`);
+
+  const startTime = Math.max(0, currentTime - 5);
+  const audioDuration = 20;
+
+  try {
+    const baseUrl = `http://localhost:${process.env.PORT || 3001}`;
+    const videoUrl = `${baseUrl}/api/movies/${req.params.id}/stream`;
+    const ffmpegPath = process.env.FFMPEG_PATH || '/opt/homebrew/bin/ffmpeg';
+    const whisperPath = process.env.WHISPER_PATH || '/opt/homebrew/bin/whisper';
+
+    console.log(`[whisper-sync] Extracting ${audioDuration}s audio at t=${startTime}s...`);
+    await execFileAsync(ffmpegPath, [
+      '-ss', String(startTime),
+      '-i', videoUrl,
+      '-t', String(audioDuration),
+      '-vn',
+      '-ac', '1',
+      '-ar', '16000',
+      '-f', 'wav',
+      '-y',
+      audioWav,
+    ], { timeout: 60000 });
+
+    console.log('[whisper-sync] Running Whisper transcription...');
+    await execFileAsync(whisperPath, [
+      audioWav,
+      '--model', 'base',
+      '--language', 'en',
+      '--output_format', 'json',
+      '--output_dir', tmpDir,
+    ], { timeout: 90000 });
+
+    if (!fs.existsSync(whisperJsonFile)) {
+      throw new Error('Whisper did not produce output JSON');
+    }
+
+    const whisperResult = JSON.parse(fs.readFileSync(whisperJsonFile, 'utf-8'));
+    const whisperSegments = whisperResult.segments || [];
+
+    if (whisperSegments.length === 0) {
+      return res.status(422).json({ error: 'No speech detected in audio snippet' });
+    }
+
+    // Normalize text for fuzzy matching: lowercase, remove punctuation
+    function normalizeText(text) {
+      return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    // Word overlap ratio between two normalized strings
+    function wordOverlapScore(a, b) {
+      const wordsA = a.split(' ').filter(Boolean);
+      const wordsB = new Set(b.split(' ').filter(Boolean));
+      if (wordsA.length === 0 || wordsB.size === 0) return 0;
+      const overlap = wordsA.filter(w => wordsB.has(w)).length;
+      return overlap / Math.max(wordsA.length, wordsB.size);
+    }
+
+    // Find best-matching (whisperSegment, subtitleCue) pair
+    let bestScore = 0;
+    let bestWhisperSegment = null;
+    let bestSubCue = null;
+
+    for (const seg of whisperSegments) {
+      const normSeg = normalizeText(seg.text);
+      for (const cue of subtitleCues) {
+        const normCue = normalizeText(cue.text);
+        const score = wordOverlapScore(normSeg, normCue);
+        if (score > bestScore) {
+          bestScore = score;
+          bestWhisperSegment = seg;
+          bestSubCue = cue;
+        }
+      }
+    }
+
+    if (!bestWhisperSegment || bestScore < 0.3) {
+      return res.status(422).json({ error: 'No subtitle match found (best score: ' + bestScore.toFixed(2) + ')' });
+    }
+
+    // Whisper timestamps are relative to the start of the audio chunk
+    // chunk started at video time `startTime`
+    const spokenAtVideoTime = startTime + bestWhisperSegment.start;
+    const offset = spokenAtVideoTime - bestSubCue.start;
+
+    console.log(`[whisper-sync] Match: "${bestWhisperSegment.text.trim()}" → "${bestSubCue.text}" | offset=${offset.toFixed(2)}s confidence=${bestScore.toFixed(2)}`);
+
+    res.json({
+      offset: Math.round(offset * 10) / 10,
+      confidence: Math.round(bestScore * 100) / 100,
+      whisperText: bestWhisperSegment.text.trim(),
+      matchedCue: bestSubCue.text,
+      matchedCueTime: bestSubCue.start,
+    });
+  } catch (err) {
+    console.error('[whisper-sync] Error:', err.message);
+    res.status(500).json({ error: `Whisper sync failed: ${err.message}` });
+  } finally {
+    try { fs.unlinkSync(audioWav); } catch {}
+    try { fs.unlinkSync(whisperJsonFile); } catch {}
+  }
+});
+
 // ============================================================
 // 123movies Direct Streaming (HLS extraction)
 // ============================================================
