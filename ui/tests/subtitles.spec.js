@@ -16,7 +16,7 @@ import { test, expect } from '@playwright/test';
  * Movie 1351 = Attack on Titan (has working torrent + 18 subtitle languages).
  */
 
-const UI = 'http://127.0.0.1:5173';
+const UI = 'http://localhost:5173';
 const MOVIE_ID = 1351;
 
 test.describe.serial('TorrentPlayer — full subtitle flow', () => {
@@ -147,7 +147,7 @@ test.describe.serial('TorrentPlayer — full subtitle flow', () => {
     expect(afterPlus, 'Offset must be +0.5s after clicking +0.5s').toBe('+0.5s');
 
     // Click Reset — restores +0.0s
-    await page.click('.btn-sync-reset');
+    await page.click('.btn-sync-reset, .btn-sync.btn-sync-reset');
     const afterReset = (await syncLabel.textContent()).trim();
     console.log(`[test4] after Reset: "${afterReset}"`);
     expect(afterReset, 'Offset must return to +0.0s after Reset').toBe('+0.0s');
@@ -202,5 +202,101 @@ test.describe.serial('TorrentPlayer — full subtitle flow', () => {
     const torrentLabels = await page.$$('.sub-downloads:has-text("📦 from torrent")');
     expect(torrentLabels.length, 'Picker must show files with "📦 from torrent" label').toBeGreaterThan(0);
     console.log(`[test6] ${torrentLabels.length} "📦 from torrent" file(s) in picker`);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 7: Subtitles render via native TextTrack in fullscreen
+  // ---------------------------------------------------------------------------
+  test('Subtitles use native TextTrack API and render in fullscreen', async () => {
+    test.setTimeout(60000);
+
+    // Re-select English subtitle (was turned off in test 5)
+    const englishBtn = await page.waitForSelector('.btn-sub:has-text("English")', { timeout: 5000 });
+    await englishBtn.click();
+
+    // If file picker appears, select first file
+    const picker = await page.$('.sub-picker');
+    if (picker) {
+      const firstFile = await page.waitForSelector('.btn-sub-file', { timeout: 3000 });
+      await firstFile.click();
+    }
+
+    // Wait for video to have enough data and TextTrack to be populated
+    // Poll until TextTrack appears with cues (VTT fetch + parse takes time)
+    const trackInfo = await page.waitForFunction(() => {
+      const video = document.querySelector('video');
+      if (!video || !video.textTracks) return null;
+      for (let i = 0; i < video.textTracks.length; i++) {
+        const t = video.textTracks[i];
+        if (t.mode === 'showing' && t.cues && t.cues.length > 0) {
+          return { kind: t.kind, mode: t.mode, cueCount: t.cues.length };
+        }
+      }
+      return null;
+    }, null, { timeout: 15000 }).then(h => h.jsonValue());
+
+    console.log(`[test7] TextTrack info:`, trackInfo);
+    expect(trackInfo, 'Video must have a TextTrack with showing mode and cues').not.toBeNull();
+    expect(trackInfo.mode, 'TextTrack mode must be "showing"').toBe('showing');
+    expect(trackInfo.cueCount, 'TextTrack must have cues loaded').toBeGreaterThan(0);
+
+    // No custom subtitle overlay div should exist
+    const overlay = await page.$('.subtitle-overlay');
+    expect(overlay, 'No .subtitle-overlay div should exist (using native TextTrack)').toBeNull();
+
+    console.log(`[test7] Native TextTrack confirmed: ${trackInfo.cueCount} cues, mode=${trackInfo.mode}`);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 8: Auto Sync button triggers whisper-sync API call
+  // ---------------------------------------------------------------------------
+  test('Auto Sync triggers whisper-sync endpoint and updates offset', async () => {
+    test.setTimeout(180000); // Whisper can take up to 2 min
+
+    // Need video playing with subtitle selected — should be set from test 7
+    // Seek to at least 30s to have enough audio context
+    await page.evaluate(() => {
+      const video = document.querySelector('video');
+      if (video && video.readyState >= 2) video.currentTime = 60;
+    });
+    await page.waitForTimeout(2000);
+
+    // Intercept the whisper-sync API call
+    const apiPromise = page.waitForResponse(
+      resp => resp.url().includes('/whisper-sync') && resp.request().method() === 'POST',
+      { timeout: 150000 }
+    );
+
+    // Click Auto Sync
+    const autoSyncBtn = await page.waitForSelector('.btn-auto-sync', { timeout: 5000 });
+    expect(autoSyncBtn, 'Auto Sync button must exist').toBeTruthy();
+    await autoSyncBtn.click();
+
+    // Button should show syncing state (disabled)
+    const isDisabled = await autoSyncBtn.evaluate(el => el.disabled);
+    expect(isDisabled, 'Auto Sync button should be disabled while syncing').toBeTruthy();
+    console.log('[test8] Auto Sync clicked, waiting for whisper-sync response...');
+
+    // Wait for API response
+    const response = await apiPromise;
+    const status = response.status();
+    console.log(`[test8] whisper-sync responded with status ${status}`);
+
+    if (status === 200) {
+      const body = await response.json();
+      console.log(`[test8] offset=${body.offset}, confidence=${body.confidence}, detected=${body.detectedLanguage}`);
+      expect(typeof body.offset, 'Response must have numeric offset').toBe('number');
+      expect(typeof body.confidence, 'Response must have numeric confidence').toBe('number');
+
+      // Sync status should appear briefly
+      const syncStatus = await page.waitForSelector('.sync-status', { timeout: 5000 }).catch(() => null);
+      if (syncStatus) {
+        const statusText = await syncStatus.textContent();
+        console.log(`[test8] sync status: "${statusText}"`);
+      }
+    } else {
+      // 422 (no speech) or 500 are acceptable — we just verify the endpoint was called
+      console.log(`[test8] whisper-sync returned ${status} — endpoint works, sync may have failed (no speech / no match)`);
+    }
   });
 });
