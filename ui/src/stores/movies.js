@@ -16,6 +16,7 @@ export const useMoviesStore = defineStore('movies', {
       source: 'all',
       min_rating: 6,
       search: '',
+      type: 'all',
     },
   }),
 
@@ -26,6 +27,7 @@ export const useMoviesStore = defineStore('movies', {
         const params = { page, limit: 40, ...this.filters };
         if (!params.genre) delete params.genre;
         if (params.source === 'all') delete params.source;
+        if (params.type === 'all') delete params.type;
         const { data } = await axios.get('/api/movies', { params });
         this.movies = data.movies;
         this.total = data.total;

@@ -30,6 +30,7 @@ router.get('/', (req, res) => {
     favorites,
     show_hidden,
     only_hidden,
+    type = 'all',
   } = req.query;
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -67,15 +68,34 @@ router.get('/', (req, res) => {
     conditions.push("is_hidden = 0");
   }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  // Type filter: show movies, series (one row per show), or all
+  let typeCondition;
+  if (type === 'movie') {
+    typeCondition = "m.type != 'series'";
+  } else if (type === 'series') {
+    typeCondition = "m.type = 'series' AND sr.rep_id IS NOT NULL";
+  } else {
+    // Default 'all': show movies + one representative row per series
+    typeCondition = "(m.type != 'series' OR sr.rep_id IS NOT NULL)";
+  }
+
+  const allConditions = [typeCondition, ...conditions];
+  const where = `WHERE ${allConditions.join(' AND ')}`;
 
   const allowedSorts = ['added_at', 'imdb_rating', 'title', 'year'];
   const sortCol = allowedSorts.includes(sort) ? sort : 'added_at';
   const sortOrder = order === 'asc' ? 'ASC' : 'DESC';
 
-  const total = db.prepare(`SELECT COUNT(*) as c FROM movies ${where}`).get(params).c;
+  // CTE groups series by series_imdb_id, keeping MIN(id) as the representative row
+  const cte = `WITH series_reps AS (
+    SELECT MIN(id) as rep_id FROM movies WHERE type = 'series' GROUP BY COALESCE(series_imdb_id, CAST(id AS TEXT))
+  )`;
+  const fromJoin = `FROM movies m LEFT JOIN series_reps sr ON m.id = sr.rep_id`;
+  const episodeCount = `CASE WHEN m.type = 'series' THEN (SELECT COUNT(*) FROM movies mc WHERE mc.series_imdb_id = m.series_imdb_id) ELSE NULL END as episode_count`;
+
+  const total = db.prepare(`${cte} SELECT COUNT(*) as c ${fromJoin} ${where}`).get(params).c;
   const movies = db.prepare(
-    `SELECT * FROM movies ${where} ORDER BY ${sortCol} ${sortOrder} LIMIT @limit OFFSET @offset`
+    `${cte} SELECT m.*, ${episodeCount} ${fromJoin} ${where} ORDER BY m.${sortCol} ${sortOrder} LIMIT @limit OFFSET @offset`
   ).all({ ...params, limit: parseInt(limit), offset });
 
   res.json({
@@ -91,6 +111,27 @@ router.get('/:id', (req, res) => {
   const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
   res.json(movie);
+});
+
+// Get all episodes for the series that movie :id belongs to
+router.get('/:id/episodes', (req, res) => {
+  const movie = db.prepare('SELECT series_imdb_id FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+  if (!movie.series_imdb_id) return res.status(400).json({ error: 'Not a series episode' });
+
+  const episodes = db.prepare(
+    'SELECT * FROM movies WHERE series_imdb_id = ? ORDER BY season ASC, episode ASC'
+  ).all(movie.series_imdb_id);
+
+  // Group by season
+  const seasons = {};
+  for (const ep of episodes) {
+    const s = ep.season || 1;
+    if (!seasons[s]) seasons[s] = [];
+    seasons[s].push(ep);
+  }
+
+  res.json({ seasons, totalEpisodes: episodes.length });
 });
 
 // Toggle favorite

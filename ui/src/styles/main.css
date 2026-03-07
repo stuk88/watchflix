@@ -254,6 +254,18 @@ a { color: inherit; text-decoration: none; }
 .rating-badge.mid { background: rgba(255,152,0,0.2); color: var(--mid); }
 .rating-badge.bad { background: rgba(244,67,54,0.2); color: var(--bad); }
 
+.series-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(138, 43, 226, 0.2);
+  color: #b060ff;
+}
+
 .source-badge {
   font-size: 10px;
   padding: 2px 5px;
@@ -410,6 +422,63 @@ a { color: inherit; text-decoration: none; }
 }
 .source-tab:hover { border-color: var(--accent); color: var(--text); }
 .source-tab.active { background: var(--accent); color: #111; border-color: var(--accent); }
+
+/* Season tabs */
+.season-tabs { margin-bottom: 12px; }
+.season-tabs .source-tab { padding: 8px 16px; font-size: 13px; }
+.season-tabs .source-tab.active { background: #b060ff; border-color: #b060ff; color: #fff; }
+.season-tabs .source-tab:hover { border-color: #b060ff; }
+
+/* Episode list */
+.episode-list-wrap {
+  margin-bottom: 20px;
+}
+.episode-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.episode-list::-webkit-scrollbar { height: 4px; }
+.episode-list::-webkit-scrollbar-track { background: transparent; }
+.episode-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+.episode-pill {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--bg-surface);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+  max-width: 140px;
+  text-align: left;
+}
+.episode-pill:hover { border-color: #b060ff; color: var(--text); }
+.episode-pill.active { background: rgba(176,96,255,0.2); border-color: #b060ff; color: #b060ff; }
+.episode-pill .ep-num { font-weight: 700; font-size: 11px; }
+.episode-pill .ep-title { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 116px; }
+
+/* TV Series badge in hero title */
+.tv-badge {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(176,96,255,0.2);
+  color: #b060ff;
+  vertical-align: middle;
+  margin-left: 8px;
+}
 
 /* Player area */
 .player-area {

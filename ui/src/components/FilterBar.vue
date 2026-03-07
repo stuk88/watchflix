@@ -1,6 +1,14 @@
 <template>
   <div class="filter-bar">
     <label>
+      Type
+      <select v-model="store.filters.type" @change="apply">
+        <option value="all">All Types</option>
+        <option value="movie">Movies</option>
+        <option value="series">TV Series</option>
+      </select>
+    </label>
+    <label>
       Genre
       <select v-model="store.filters.genre" @change="apply">
         <option value="">All</option>

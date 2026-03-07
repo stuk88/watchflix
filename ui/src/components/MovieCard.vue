@@ -22,7 +22,10 @@
       <div class="card-title">{{ movie.title }}</div>
       <div class="card-meta">
         <span v-if="movie.year">{{ movie.year }}</span>
-        <span class="rating-badge" :class="ratingClass">
+        <span v-if="movie.type === 'series'" class="series-badge">
+          📺 {{ seasonLabel }}
+        </span>
+        <span v-else class="rating-badge" :class="ratingClass">
           ⭐ {{ movie.imdb_rating || 'N/A' }}
         </span>
         <span class="source-badge" :class="sourceClass">{{ sourceLabel }}</span>
@@ -43,6 +46,13 @@ const ratingClass = computed(() => {
   if (r >= 7) return 'good';
   if (r >= 5) return 'mid';
   return 'bad';
+});
+
+const seasonLabel = computed(() => {
+  const count = props.movie.episode_count;
+  if (!count) return 'TV Series';
+  const s = props.movie.season;
+  return s ? `S${s} • ${count} ep` : `${count} episodes`;
 });
 
 const sourceClass = computed(() => {
