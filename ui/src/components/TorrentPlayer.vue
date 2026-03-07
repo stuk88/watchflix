@@ -43,7 +43,8 @@
           @click="selectSubtitleFile(file)"
         >
           <span class="sub-filename">{{ file.filename }}</span>
-          <span class="sub-downloads">{{ file.downloads.toLocaleString() }} downloads</span>
+          <span v-if="file.downloads >= 0" class="sub-downloads">{{ file.downloads.toLocaleString() }} downloads</span>
+          <span v-else class="sub-downloads">📦 from torrent</span>
         </button>
       </div>
       <!-- Torrent filename -->
@@ -115,6 +116,7 @@ const activeStreamUrl = ref('');
 let statsInterval = null;
 let peerCheckTimer = null;
 let subtitlesFetched = false;
+let torrentSubsAdded = false;
 
 const streamUrl = computed(() => activeStreamUrl.value);
 
@@ -155,6 +157,12 @@ async function pollStats() {
         torrentFilename.value = data.filename;
         fetchSubtitlesForMovie(data.filename);
       }
+
+      // Add torrent-bundled subtitle files
+      if (data.subtitleFiles?.length && !torrentSubsAdded) {
+        torrentSubsAdded = true;
+        addTorrentSubtitleFiles(data.subtitleFiles);
+      }
     }
   } catch {}
 }
@@ -167,6 +175,25 @@ async function fetchSubtitlesForMovie(filename) {
   } catch (err) {
     console.error('[torrent-player] Subtitle fetch error:', err.message);
   }
+}
+
+function addTorrentSubtitleFiles(subFiles) {
+  // Parse language from filename, e.g. "Movie.en.srt" or "Subs/English.srt"
+  const torrentGroup = {
+    language: '_torrent',
+    label: '📦 Torrent',
+    files: subFiles.map(f => {
+      // Try to extract lang hint from filename
+      const name = f.name.split('/').pop();
+      return {
+        filename: name,
+        url: `/api/movies/${props.movieId}/torrent-subtitle/${f.index}`,
+        downloads: -1, // marker for torrent files
+      };
+    }),
+  };
+  // Prepend torrent subs so they appear first
+  subtitleTracks.value = [torrentGroup, ...subtitleTracks.value];
 }
 
 function parseVTT(vttText) {

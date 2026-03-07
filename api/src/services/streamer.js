@@ -47,6 +47,11 @@ export function getVideoFile(magnet) {
         : torrent.files.reduce((a, b) => a.length > b.length ? a : b);
 
       entry.file = file;
+      // Collect subtitle files from torrent
+      const subExts = ['.srt', '.sub', '.ass', '.ssa', '.vtt'];
+      entry.subtitleFiles = torrent.files.filter(f =>
+        subExts.some(ext => f.name.toLowerCase().endsWith(ext))
+      );
       resolve(entry);
       scheduleCleanup(hash);
     });
@@ -90,5 +95,6 @@ export function getStats(magnet) {
     downloaded: t.downloaded,
     total: entry.file?.length || 0,
     filename: entry.file?.name || null,
+    subtitleFiles: (entry.subtitleFiles || []).map((f, i) => ({ index: i, name: f.name, size: f.length })),
   };
 }

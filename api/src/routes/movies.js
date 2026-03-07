@@ -4,7 +4,7 @@ import db from '../db.js';
 import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats } from '../services/streamer.js';
 import { extractStreamUrl, getAvailableServers } from '../services/stream-extractor.js';
-import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle } from '../services/subtitles.js';
+import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
 
 const router = Router();
 
@@ -301,6 +301,43 @@ router.get('/:id/stream-stats', (req, res) => {
   if (!movie?.torrent_magnet) return res.json({ peers: 0 });
   const stats = getStats(movie.torrent_magnet);
   res.json(stats || { peers: 0 });
+});
+
+// Serve a subtitle file from the torrent as VTT
+router.get('/:id/torrent-subtitle/:index', async (req, res) => {
+  const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie?.torrent_magnet) return res.status(400).json({ error: 'No torrent' });
+
+  try {
+    const entry = await getVideoFile(movie.torrent_magnet);
+    const idx = parseInt(req.params.index);
+    const subFile = (entry.subtitleFiles || [])[idx];
+    if (!subFile) return res.status(404).json({ error: 'Subtitle file not found' });
+
+    // Read the full subtitle file
+    const chunks = [];
+    const stream = subFile.createReadStream();
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+    let text = Buffer.concat(chunks).toString('utf-8');
+
+    // Convert to VTT if needed
+    const ext = subFile.name.split('.').pop().toLowerCase();
+    if (ext === 'srt') {
+      text = srtToVtt(text);
+    } else if (ext !== 'vtt') {
+      // For .ass/.ssa/.sub — just serve as-is, frontend won't parse them but at least they're available
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.send(text);
+    }
+
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.send(text);
+  } catch (err) {
+    console.error('[torrent-subtitle] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ============================================================
