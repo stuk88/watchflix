@@ -359,6 +359,8 @@ router.post('/:id/subtitle-sync', async (req, res) => {
   const subIn = path.join(tmpDir, `sub_in_${req.params.id}_${Date.now()}.srt`);
   const subOut = path.join(tmpDir, `sub_out_${req.params.id}_${Date.now()}.srt`);
 
+  const audioWav = path.join(tmpDir, `audio_${req.params.id}_${Date.now()}.wav`);
+
   try {
     // Fetch the subtitle content
     const baseUrl = `http://localhost:${process.env.PORT || 3001}`;
@@ -368,16 +370,30 @@ router.post('/:id/subtitle-sync', async (req, res) => {
     // ffsubsync works with SRT, convert VTT back to SRT-ish (just write as-is, ffsubsync handles both)
     fs.writeFileSync(subIn, vttText, 'utf-8');
 
-    // Run ffsubsync against the video stream URL
+    // ffsubsync cannot read HTTP URLs, so extract audio to a temp WAV first
     const videoUrl = `${baseUrl}/api/movies/${req.params.id}/stream`;
+    const ffmpegPath = process.env.FFMPEG_PATH || '/opt/homebrew/bin/ffmpeg';
     const ffsubsyncPath = process.env.FFSUBSYNC_PATH || `${os.homedir()}/.local/bin/ffsubsync`;
 
+    console.log('[subtitle-sync] Extracting audio via ffmpeg...');
+    await execFileAsync(ffmpegPath, [
+      '-i', videoUrl,
+      '-vn',           // no video
+      '-ac', '1',      // mono
+      '-ar', '16000',  // 16kHz (sufficient for speech detection)
+      '-t', '600',     // first 10 minutes is enough for sync detection
+      '-f', 'wav',
+      '-y',            // overwrite if exists
+      audioWav,
+    ], { timeout: 120000 });
+
+    console.log('[subtitle-sync] Running ffsubsync...');
     const { stdout, stderr } = await execFileAsync(ffsubsyncPath, [
-      videoUrl,
+      audioWav,
       '-i', subIn,
       '-o', subOut,
       '--max-offset-seconds', '120',
-      '--vad', 'webrtc',
+      '--vad', 'auditok',
     ], { timeout: 120000 });
 
     console.log('[subtitle-sync] ffsubsync output:', stderr || stdout);
@@ -392,6 +408,7 @@ router.post('/:id/subtitle-sync', async (req, res) => {
     // Clean up temp files
     try { fs.unlinkSync(subIn); } catch {}
     try { fs.unlinkSync(subOut); } catch {}
+    try { fs.unlinkSync(audioWav); } catch {}
 
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
     res.send(syncedVtt);
@@ -399,6 +416,7 @@ router.post('/:id/subtitle-sync', async (req, res) => {
     console.error('[subtitle-sync] Error:', err.message);
     try { fs.unlinkSync(subIn); } catch {}
     try { fs.unlinkSync(subOut); } catch {}
+    try { fs.unlinkSync(audioWav); } catch {}
     res.status(500).json({ error: `Sync failed: ${err.message}` });
   }
 });
