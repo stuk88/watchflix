@@ -49,6 +49,18 @@ db.exec(`
     scraped_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     count INTEGER DEFAULT 0
   );
+
+  CREATE TABLE IF NOT EXISTS stream_cache (
+    movie_id INTEGER NOT NULL,
+    server INTEGER NOT NULL,
+    m3u8_url TEXT,
+    subtitle_url TEXT,
+    tmdb_id INTEGER,
+    extracted_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    error TEXT,
+    PRIMARY KEY (movie_id, server)
+  );
 `);
 
 export default db;

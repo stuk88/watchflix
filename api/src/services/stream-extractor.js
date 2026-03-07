@@ -100,6 +100,17 @@ export async function extractStreamUrl(movieId, server = 2) {
   const cached = cache.get(cacheKey);
   if (cached && cached.expiry > Date.now()) return cached;
 
+  // Check persistent DB cache before launching a browser
+  const dbCached = db.prepare(
+    'SELECT m3u8_url, subtitle_url, tmdb_id, expires_at FROM stream_cache WHERE movie_id = ? AND server = ? AND error IS NULL'
+  ).get(movieId, server);
+  if (dbCached && dbCached.expires_at > Date.now()) {
+    const result = { m3u8: dbCached.m3u8_url, subtitles: dbCached.subtitle_url, tmdbId: dbCached.tmdb_id, expiry: dbCached.expires_at };
+    cache.set(cacheKey, result);
+    console.log(`[extractor] DB cache hit for movie ${movieId} server ${server}`);
+    return result;
+  }
+
   const movie = db.prepare('SELECT imdb_id, series_imdb_id, source_url, title, year, type, season, episode FROM movies WHERE id = ?').get(movieId);
   if (!movie) throw new Error('Movie not found');
 
