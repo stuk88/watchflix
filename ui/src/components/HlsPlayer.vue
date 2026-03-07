@@ -16,7 +16,32 @@
         controls
         autoplay
         class="player-video"
-      ></video>
+      >
+        <track
+          v-for="track in subtitleTracks"
+          :key="track.language"
+          kind="subtitles"
+          :label="track.label"
+          :srclang="track.language"
+          :src="track.url"
+        />
+      </video>
+      <!-- Subtitle controls (shown when subtitles are available) -->
+      <div v-if="!loading && !error && subtitleTracks.length" class="subtitle-bar">
+        <span class="subtitle-label">CC:</span>
+        <button
+          class="btn btn-sub"
+          :class="{ active: currentSubtitle === null }"
+          @click="selectSubtitle(null)"
+        >Off</button>
+        <button
+          v-for="track in subtitleTracks"
+          :key="track.language"
+          class="btn btn-sub"
+          :class="{ active: currentSubtitle === track.language }"
+          @click="selectSubtitle(track.language)"
+        >{{ track.label }}</button>
+      </div>
       <div v-if="error" class="error-state">
         <p>{{ error }}</p>
         <div v-if="servers.length" class="server-switch">
@@ -65,6 +90,8 @@ const error = ref(null);
 const videoEl = ref(null);
 const servers = ref([]);
 const currentServer = ref(2);
+const subtitleTracks = ref([]);
+const currentSubtitle = ref(null);
 
 let hls = null;
 
@@ -101,6 +128,7 @@ async function loadStream(server) {
       videoEl.value.src = proxyUrl;
       videoEl.value.addEventListener('loadedmetadata', () => {
         loading.value = false;
+        fetchSubtitlesForMovie();
       }, { once: true });
       videoEl.value.addEventListener('error', () => {
         error.value = 'Failed to play stream. Try another server.';
@@ -128,6 +156,7 @@ async function loadStream(server) {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         loading.value = false;
         videoEl.value?.play().catch(() => {});
+        fetchSubtitlesForMovie();
       });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
@@ -147,8 +176,36 @@ async function loadStream(server) {
   }
 }
 
+async function fetchSubtitlesForMovie() {
+  try {
+    const { data } = await axios.get(`/api/movies/${props.movieId}/subtitles`);
+    subtitleTracks.value = data.tracks || [];
+    // Default all tracks to hidden; user picks via selectSubtitle()
+    await nextTick();
+    if (videoEl.value) {
+      const tracks = videoEl.value.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        tracks[i].mode = 'hidden';
+      }
+    }
+  } catch (err) {
+    console.error('[hls-player] Subtitle fetch error:', err.message);
+  }
+}
+
+function selectSubtitle(lang) {
+  currentSubtitle.value = lang;
+  if (!videoEl.value) return;
+  const tracks = videoEl.value.textTracks;
+  for (let i = 0; i < tracks.length; i++) {
+    tracks[i].mode = tracks[i].language === lang ? 'showing' : 'hidden';
+  }
+}
+
 async function switchServer(serverId) {
   currentServer.value = serverId;
+  subtitleTracks.value = [];
+  currentSubtitle.value = null;
   if (hls) {
     hls.destroy();
     hls = null;
@@ -285,5 +342,35 @@ onUnmounted(() => {
 .btn-server-sm {
   padding: 4px 10px;
   font-size: 12px;
+}
+.subtitle-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  flex-wrap: wrap;
+}
+.subtitle-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.btn-sub {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text-dim);
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.btn-sub:hover {
+  background: rgba(255,255,255,0.1);
+}
+.btn-sub.active {
+  background: var(--accent, #77be41);
+  color: #000;
+  border-color: var(--accent, #77be41);
 }
 </style>

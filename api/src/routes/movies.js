@@ -4,6 +4,7 @@ import db from '../db.js';
 import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats } from '../services/streamer.js';
 import { extractStreamUrl, getAvailableServers } from '../services/stream-extractor.js';
+import { fetchSubtitles, fetchAndConvertSubtitle } from '../services/subtitles.js';
 
 const router = Router();
 
@@ -373,6 +374,44 @@ router.get('/:id/123proxy', async (req, res) => {
   } catch (err) {
     console.error('[123proxy] Error:', err.message);
     res.status(502).json({ error: 'Proxy fetch failed' });
+  }
+});
+
+// Get available subtitle tracks for a movie (from OpenSubtitles by IMDB ID)
+router.get('/:id/subtitles', async (req, res) => {
+  try {
+    const movie = db.prepare('SELECT imdb_id FROM movies WHERE id = ?').get(req.params.id);
+    if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+    const tracks = await fetchSubtitles(req.params.id);
+
+    // Return tracks with proxied URLs to avoid CORS issues
+    const proxied = tracks.map((t) => ({
+      language: t.language,
+      label: t.label,
+      url: `/api/movies/${req.params.id}/subtitle-proxy?url=${encodeURIComponent(t.url)}`,
+    }));
+
+    res.json({ tracks: proxied });
+  } catch (err) {
+    console.error('[subtitles] Route error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Proxy external subtitle files, converting SRT/SRT.GZ to VTT on the fly
+router.get('/:id/subtitle-proxy', async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).json({ error: 'Missing url param' });
+
+  try {
+    const vttText = await fetchAndConvertSubtitle(url);
+    res.set('Content-Type', 'text/vtt; charset=utf-8');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send(vttText);
+  } catch (err) {
+    console.error('[subtitle-proxy] Error:', err.message);
+    res.status(502).json({ error: 'Subtitle fetch failed: ' + err.message });
   }
 });
 
