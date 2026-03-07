@@ -23,7 +23,7 @@ function parseSeasonNumber(rawTitle) {
  * Fetch the series page and return an array of episode numbers found in ul.episodes.
  * Each episode link has id="ep-N" where N is the episode number.
  */
-async function fetchEpisodes(seriesUrl) {
+export async function fetchEpisodes(seriesUrl) {
   try {
     const { data: html } = await axios.get(seriesUrl, {
       timeout: 15000,

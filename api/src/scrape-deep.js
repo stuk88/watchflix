@@ -1,8 +1,11 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { fileURLToPath } from 'url';
 import config from './config.js';
 import { fetchRatings } from './services/omdb.js';
 import { scrapeTorrentsYTS, scrapeTorrentsTPB, scrapeTorrentsTPBTop } from './scrapers/torrents.js';
+import { fetchEpisodes } from './scrapers/123movies.js';
+import { extractTmdbFrom123 } from './services/stream-extractor.js';
 import db from './db.js';
 
 // ============================================================
@@ -42,12 +45,13 @@ const TPB_SEARCHES = [
 // ============================================================
 // Throttled OMDb queue (single global queue, rate-limited)
 // ============================================================
-class OmdbThrottler {
-  constructor(rps) {
+export class OmdbThrottler {
+  constructor(rps, fetchFn = fetchRatings) {
     this.interval = 1000 / rps;
     this.queue = [];
     this.running = false;
     this.totalCalls = 0;
+    this.fetchFn = fetchFn;
   }
 
   request(title, year) {
@@ -62,7 +66,7 @@ class OmdbThrottler {
     this.running = true;
     while (this.queue.length > 0) {
       const { title, year, resolve } = this.queue.shift();
-      const result = await fetchRatings(title, year);
+      const result = await this.fetchFn(title, year);
       this.totalCalls++;
       resolve(result);
       await new Promise(r => setTimeout(r, this.interval));
@@ -78,7 +82,7 @@ const omdb = new OmdbThrottler(OMDB_RPM);
 // ============================================================
 let stats = { saved: 0, skipped: 0, duplicates: 0 };
 
-function cleanTitle(raw) {
+export function cleanTitle(raw) {
   return raw
     .replace(/\s*[-–—]\s*Season\s*\d+.*/i, '')
     .replace(/\s*Season\s*\d+.*/i, '')
@@ -86,16 +90,26 @@ function cleanTitle(raw) {
     .trim();
 }
 
+function parseSeasonNumber(rawTitle) {
+  const match = rawTitle.match(/Season\s*(\d+)/i);
+  return match ? parseInt(match[1], 10) : 1;
+}
+
 // ============================================================
 // DB statements
 // ============================================================
-const insertStmt = db.prepare(`
+export const insertStmt = db.prepare(`
   INSERT OR IGNORE INTO movies (title, year, imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, source_url)
   VALUES (@title, @year, @imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @source_url)
 `);
 
 const updateTo123 = db.prepare(`
   UPDATE movies SET source = 'both', source_url = @source_url WHERE imdb_id = @imdb_id AND source = 'torrent'
+`);
+
+export const insertEpisodeStmt = db.prepare(`
+  INSERT OR IGNORE INTO movies (title, year, series_imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, source_url, type, season, episode, episode_title)
+  VALUES (@title, @year, @series_imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @source_url, @type, @season, @episode, @episode_title)
 `);
 
 // ============================================================
@@ -114,40 +128,108 @@ async function scrape123Genre(genre) {
 
       const $ = cheerio.load(html);
       const items = [];
-      $('a.poster[title]').each((_, el) => {
-        const rawTitle = $(el).attr('title');
-        const href = $(el).attr('href');
-        if (rawTitle && href) {
-          items.push({ rawTitle, href: href.startsWith('http') ? href : `${BASE}${href}` });
-        }
+      // Use .item selector to detect TV shows via <i class="type">TV</i>
+      $('.item').each((_, el) => {
+        const posterEl = $(el).find('a.poster[title]');
+        const rawTitle = posterEl.attr('title');
+        const href = posterEl.attr('href');
+        if (!rawTitle || !href) return;
+
+        const typeText = $(el).find('i.type').text().trim().toUpperCase();
+        const isTv = typeText === 'TV';
+
+        items.push({
+          rawTitle,
+          href: href.startsWith('http') ? href : `${BASE}${href}`,
+          isTv,
+        });
       });
 
       if (items.length === 0) break;
 
       // Process all items on this page concurrently (OMDb is throttled globally)
-      const promises = items.map(async ({ rawTitle, href }) => {
+      const promises = items.map(async ({ rawTitle, href, isTv }) => {
         const title = cleanTitle(rawTitle);
         if (!title) return;
 
-        const existingUrl = db.prepare('SELECT id FROM movies WHERE source_url = ?').get(href);
-        if (existingUrl) { stats.duplicates++; return; }
+        if (isTv) {
+          const season = parseSeasonNumber(rawTitle);
 
-        const ratings = await omdb.request(title);
-        if (!ratings || !ratings.imdb_id) { stats.skipped++; return; }
-        if (!ratings.imdb_rating || ratings.imdb_rating < config.minImdbRating) { stats.skipped++; return; }
+          const existingEp = db.prepare(
+            'SELECT id FROM movies WHERE title = ? AND source_url = ? AND type = ? AND season = ?'
+          ).get(title, href, 'series', season);
+          if (existingEp) { stats.duplicates++; return; }
 
-        const existingImdb = db.prepare('SELECT id, source FROM movies WHERE imdb_id = ?').get(ratings.imdb_id);
-        if (existingImdb) {
-          if (existingImdb.source === 'torrent') {
-            updateTo123.run({ imdb_id: ratings.imdb_id, source_url: href });
+          const ratings = await omdb.request(title);
+          if (!ratings || !ratings.imdb_id) { stats.skipped++; return; }
+          if (!ratings.imdb_rating || ratings.imdb_rating < config.minImdbRating) { stats.skipped++; return; }
+
+          const episodes = await fetchEpisodes(href);
+          if (episodes.length === 0) {
+            const existing2 = db.prepare(
+              'SELECT id FROM movies WHERE series_imdb_id = ? AND season = ? AND episode IS NULL'
+            ).get(ratings.imdb_id, season);
+            if (!existing2) {
+              insertEpisodeStmt.run({
+                ...ratings,
+                series_imdb_id: ratings.imdb_id,
+                imdb_id: undefined,
+                source: '123movies',
+                source_url: href,
+                type: 'series',
+                season,
+                episode: null,
+                episode_title: null,
+              });
+              saved++;
+              stats.saved++;
+            } else {
+              stats.duplicates++;
+            }
+          } else {
+            for (const ep of episodes) {
+              const existingEpRow = db.prepare(
+                'SELECT id FROM movies WHERE series_imdb_id = ? AND season = ? AND episode = ?'
+              ).get(ratings.imdb_id, season, ep.episode);
+              if (existingEpRow) { stats.duplicates++; continue; }
+
+              insertEpisodeStmt.run({
+                ...ratings,
+                series_imdb_id: ratings.imdb_id,
+                imdb_id: undefined,
+                source: '123movies',
+                source_url: href,
+                type: 'series',
+                season,
+                episode: ep.episode,
+                episode_title: ep.episode_title,
+              });
+              saved++;
+              stats.saved++;
+            }
           }
-          stats.duplicates++;
-          return;
-        }
+        } else {
+          // Movie
+          const existingUrl = db.prepare('SELECT id FROM movies WHERE source_url = ?').get(href);
+          if (existingUrl) { stats.duplicates++; return; }
 
-        insertStmt.run({ ...ratings, source: '123movies', source_url: href });
-        saved++;
-        stats.saved++;
+          const ratings = await omdb.request(title);
+          if (!ratings || !ratings.imdb_id) { stats.skipped++; return; }
+          if (!ratings.imdb_rating || ratings.imdb_rating < config.minImdbRating) { stats.skipped++; return; }
+
+          const existingImdb = db.prepare('SELECT id, source FROM movies WHERE imdb_id = ?').get(ratings.imdb_id);
+          if (existingImdb) {
+            if (existingImdb.source === 'torrent') {
+              updateTo123.run({ imdb_id: ratings.imdb_id, source_url: href });
+            }
+            stats.duplicates++;
+            return;
+          }
+
+          insertStmt.run({ ...ratings, source: '123movies', source_url: href });
+          saved++;
+          stats.saved++;
+        }
       });
 
       await Promise.all(promises);
@@ -201,6 +283,9 @@ async function main() {
   // Phase 3: 123movies — parallel genres
   await runParallel(GENRES, scrape123Genre, '📡 PHASE 3: 123Movies');
 
+  // Phase 4: Pre-extract TMDB IDs for 123movies entries
+  await extractEmbedPhase();
+
   const elapsed = ((Date.now() - startTime) / 1000 / 60).toFixed(1);
   const endCount = db.prepare('SELECT COUNT(*) as c FROM movies').get().c;
 
@@ -216,7 +301,59 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+// ============================================================
+// Phase 4: Pre-extract TMDB IDs for 123movies entries
+// ============================================================
+export async function extractEmbedPhase(extractFn = extractTmdbFrom123) {
+  const MAX_CONCURRENT = 2;
+
+  // One extraction per source page (TV shows share a page across all episodes)
+  const rows = db.prepare(`
+    SELECT source_url, type, series_imdb_id, MIN(id) as id
+    FROM movies
+    WHERE (source = '123movies' OR source = 'both')
+      AND tmdb_id IS NULL
+      AND source_url IS NOT NULL
+    GROUP BY source_url
+  `).all();
+
+  console.log(`\n📡 PHASE 4: Embed Extraction — ${rows.length} pages to process`);
+
+  let extracted = 0;
+
+  for (let i = 0; i < rows.length; i += MAX_CONCURRENT) {
+    const batch = rows.slice(i, i + MAX_CONCURRENT);
+
+    await Promise.all(batch.map(async (row) => {
+      try {
+        const tmdbId = await extractFn(row.source_url);
+        if (!tmdbId) return;
+
+        if (row.type === 'series' && row.series_imdb_id) {
+          db.prepare('UPDATE movies SET tmdb_id = ? WHERE series_imdb_id = ? AND tmdb_id IS NULL')
+            .run(tmdbId, row.series_imdb_id);
+          const titleRow = db.prepare('SELECT title FROM movies WHERE series_imdb_id = ? LIMIT 1').get(row.series_imdb_id);
+          console.log(`  ✅ Extracted TMDB for ${titleRow?.title}: ${tmdbId}`);
+        } else {
+          db.prepare('UPDATE movies SET tmdb_id = ? WHERE id = ?').run(tmdbId, row.id);
+          const titleRow = db.prepare('SELECT title FROM movies WHERE id = ?').get(row.id);
+          console.log(`  ✅ Extracted TMDB for ${titleRow?.title}: ${tmdbId}`);
+        }
+        extracted++;
+      } catch (err) {
+        console.error(`  ❌ Failed TMDB extraction for ${row.source_url}:`, err.message);
+      }
+    }));
+  }
+
+  console.log(`  Phase 4 complete: ${extracted} TMDB IDs extracted`);
+  return extracted;
+}
+
+// Only run main when invoked directly (not imported by tests)
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(err => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+  });
+}

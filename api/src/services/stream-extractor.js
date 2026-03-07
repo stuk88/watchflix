@@ -42,7 +42,7 @@ async function getTmdbId(imdbId, sourceUrl) {
 /**
  * Quick extraction: load 123movies page just long enough to intercept the TMDB ID.
  */
-async function extractTmdbFrom123(sourceUrl) {
+export async function extractTmdbFrom123(sourceUrl) {
   let browser;
   try {
     browser = await chromium.launch({
