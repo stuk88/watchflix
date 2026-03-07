@@ -6,14 +6,29 @@
       <div class="start-quality" v-if="quality">{{ quality }}</div>
     </div>
     <div v-else>
-      <video
-        ref="videoEl"
-        controls
-        autoplay
-        class="player-video"
-        :src="streamUrl"
-        @error="onVideoError"
-      ></video>
+      <div class="video-wrap">
+        <video
+          ref="videoEl"
+          controls
+          autoplay
+          class="player-video"
+          :src="streamUrl"
+          @error="onVideoError"
+        ></video>
+        <div v-if="currentSubtitleText" class="subtitle-overlay" v-html="currentSubtitleText"></div>
+      </div>
+      <!-- Subtitle controls -->
+      <div v-if="subtitleTracks.length" class="subtitle-bar">
+        <span class="subtitle-label">CC:</span>
+        <button class="btn btn-sub" :class="{ active: currentSubtitle === null }" @click="selectSubtitle(null)">Off</button>
+        <button
+          v-for="track in subtitleTracks"
+          :key="track.language"
+          class="btn btn-sub"
+          :class="{ active: currentSubtitle === track.language }"
+          @click="selectSubtitle(track.language)"
+        >{{ track.label }}</button>
+      </div>
       <div class="torrent-info">
         <span>⬇ {{ downloadSpeed }}</span>
         <span>⬆ {{ uploadSpeed }}</span>
@@ -83,6 +98,12 @@ let peerCheckTimer = null;
 
 const streamUrl = computed(() => activeStreamUrl.value);
 
+const subtitleTracks = ref([]);
+const currentSubtitle = ref(null);
+const currentSubtitleText = ref('');
+let subtitleCues = [];
+let timeUpdateListener = null;
+
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB/s`;
@@ -107,12 +128,74 @@ async function pollStats() {
   } catch {}
 }
 
+async function fetchSubtitlesForMovie() {
+  try {
+    const { data } = await axios.get(`/api/movies/${props.movieId}/subtitles`);
+    subtitleTracks.value = data.tracks || [];
+  } catch (err) {
+    console.error('[torrent-player] Subtitle fetch error:', err.message);
+  }
+}
+
+function parseVTT(vttText) {
+  const cues = [];
+  const blocks = vttText.split(/\n{2,}/);
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    const tsIdx = lines.findIndex(l => l.includes('-->'));
+    if (tsIdx === -1) continue;
+    const [startStr, endStr] = lines[tsIdx].split('-->').map(s => s.trim());
+    const text = lines.slice(tsIdx + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+    if (!text) continue;
+    cues.push({ start: parseVTTTime(startStr), end: parseVTTTime(endStr), text });
+  }
+  return cues;
+}
+
+function parseVTTTime(str) {
+  const parts = str.replace(',', '.').split(':');
+  if (parts.length === 3) return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
+  return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+}
+
+function clearSubtitleListener() {
+  if (timeUpdateListener && videoEl.value) {
+    videoEl.value.removeEventListener('timeupdate', timeUpdateListener);
+    timeUpdateListener = null;
+  }
+  subtitleCues = [];
+  currentSubtitleText.value = '';
+}
+
+async function selectSubtitle(lang) {
+  currentSubtitle.value = lang;
+  clearSubtitleListener();
+  if (!lang) return;
+  const track = subtitleTracks.value.find(t => t.language === lang);
+  if (!track) return;
+  try {
+    const response = await fetch(track.url);
+    const vttText = await response.text();
+    subtitleCues = parseVTT(vttText);
+    timeUpdateListener = () => {
+      const time = videoEl.value?.currentTime ?? 0;
+      const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
+      currentSubtitleText.value = cue ? cue.text : '';
+    };
+    videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+  } catch (err) {
+    console.error('[subtitles] Failed to load VTT:', err);
+  }
+}
+
 function startPlayer() {
   if (!props.movieId) return;
   started.value = true;
   status.value = 'loading';
   activeMovieId.value = props.movieId;
   activeStreamUrl.value = `/api/movies/${props.movieId}/stream`;
+
+  fetchSubtitlesForMovie();
 
   // Poll stats every 2s
   statsInterval = setInterval(pollStats, 2000);
@@ -174,6 +257,7 @@ async function removeMovie() {
 }
 
 onUnmounted(() => {
+  clearSubtitleListener();
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
 });
@@ -214,6 +298,54 @@ onUnmounted(() => {
   width: 100%;
   border-radius: 8px;
   background: #000;
+}
+.video-wrap {
+  position: relative;
+}
+.subtitle-overlay {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  text-align: center;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.4;
+  text-shadow: 0 0 4px #000, 0 1px 3px #000;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 4px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: pre-line;
+}
+.subtitle-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  flex-wrap: wrap;
+}
+.subtitle-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.btn-sub {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text-dim);
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.btn-sub:hover { background: rgba(255,255,255,0.1); }
+.btn-sub.active {
+  background: var(--accent, #77be41);
+  color: #000;
+  border-color: var(--accent, #77be41);
 }
 .torrent-info {
   display: flex;
