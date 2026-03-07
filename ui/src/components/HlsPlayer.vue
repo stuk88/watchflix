@@ -18,6 +18,15 @@
           class="player-video"
         ></video>
       </div>
+      <!-- Playback controls -->
+      <div class="playback-controls">
+        <button class="btn btn-playback" @click="skip(-5)" title="Back 5s">⏪ 5s</button>
+        <button class="btn btn-playback" @click="skip(5)" title="Forward 5s">5s ⏩</button>
+        <span class="speed-label">Speed:</span>
+        <button v-for="s in [0.5, 0.75, 1, 1.25, 1.5, 2]" :key="s"
+          class="btn btn-speed" :class="{ active: playbackSpeed === s }"
+          @click="setSpeed(s)">{{ s }}x</button>
+      </div>
       <!-- Subtitle controls (shown when subtitles are available, even while stream is loading) -->
       <div v-if="!error && subtitleTracks.length" class="subtitle-bar">
         <span class="subtitle-label">CC:</span>
@@ -117,6 +126,7 @@ const pickerFiles = ref([]);
 const activeSubUrl = ref(null);
 const subOffset = ref(0);
 const syncing = ref(false);
+const playbackSpeed = ref(1);
 
 let hls = null;
 let subtitleCues = [];
@@ -293,6 +303,15 @@ async function selectSubtitleFile(file) {
 
 function adjustOffset(delta) {
   subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
+}
+
+function skip(seconds) {
+  if (videoEl.value) videoEl.value.currentTime += seconds;
+}
+
+function setSpeed(s) {
+  playbackSpeed.value = s;
+  if (videoEl.value) videoEl.value.playbackRate = s;
 }
 
 watch(subOffset, () => {
@@ -478,6 +497,40 @@ onUnmounted(() => {
   padding: 4px 10px;
   font-size: 12px;
 }
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+.btn-playback {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #2a2a3e;
+  color: #ccc;
+  border: 1px solid #444;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-playback:hover { background: #3a3a5e; }
+.speed-label {
+  color: #888;
+  font-size: 0.85rem;
+  margin-left: 8px;
+}
+.btn-speed {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #2a2a3e;
+  color: #ccc;
+  border: 1px solid #444;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.btn-speed:hover { background: #3a3a5e; }
+.btn-speed.active { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+
 .subtitle-bar {
   display: flex;
   align-items: center;

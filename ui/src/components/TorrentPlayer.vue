@@ -16,6 +16,15 @@
           @error="onVideoError"
         ></video>
       </div>
+      <!-- Playback controls -->
+      <div class="playback-controls">
+        <button class="btn btn-playback" @click="skip(-5)" title="Back 5s">⏪ 5s</button>
+        <button class="btn btn-playback" @click="skip(5)" title="Forward 5s">5s ⏩</button>
+        <span class="speed-label">Speed:</span>
+        <button v-for="s in [0.5, 0.75, 1, 1.25, 1.5, 2]" :key="s"
+          class="btn btn-speed" :class="{ active: playbackSpeed === s }"
+          @click="setSpeed(s)">{{ s }}x</button>
+      </div>
       <!-- Subtitle controls -->
       <div v-if="subtitleTracks.length" class="subtitle-bar">
         <span class="subtitle-label">CC:</span>
@@ -141,6 +150,7 @@ const torrentFilename = ref('');
 const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
+const playbackSpeed = ref(1);
 let subtitleCues = [];
 let activeTrack = null;
 
@@ -290,6 +300,15 @@ function adjustOffset(delta) {
   subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
 }
 
+function skip(seconds) {
+  if (videoEl.value) videoEl.value.currentTime += seconds;
+}
+
+function setSpeed(s) {
+  playbackSpeed.value = s;
+  if (videoEl.value) videoEl.value.playbackRate = s;
+}
+
 watch(subOffset, () => {
   if (activeTrack && subtitleCues.length) {
     while (activeTrack.cues.length) {
@@ -332,25 +351,9 @@ async function autoSync() {
     setTimeout(() => { syncStatus.value = ''; }, 5000);
   } catch (err) {
     console.error('[whisper-sync] Failed:', err);
-    // Fall back to ffsubsync if whisper fails
-    try {
-      const { data: syncedVtt } = await axios.post(`/api/movies/${props.movieId}/subtitle-sync`, {
-        subtitleUrl: activeSubUrl.value,
-      }, { responseType: 'text', timeout: 130000 });
-      clearSubtitleListener();
-      subtitleCues = parseVTT(syncedVtt);
-      timeUpdateListener = () => {
-        const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
-        const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
-        currentSubtitleText.value = cue ? cue.text : '';
-      };
-      videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
-      syncStatus.value = 'Synced (ffsubsync fallback)';
-      setTimeout(() => { syncStatus.value = ''; }, 5000);
-    } catch (fallbackErr) {
-      console.error('[auto-sync] Fallback also failed:', fallbackErr);
-      alert('Auto sync failed: ' + (err.response?.data?.error || err.message));
-    }
+    const msg = err.response?.data?.error || err.message;
+    syncStatus.value = `Sync failed: ${msg}`;
+    setTimeout(() => { syncStatus.value = ''; }, 8000);
   } finally {
     syncing.value = false;
   }
@@ -471,6 +474,40 @@ onUnmounted(() => {
 .video-wrap {
   position: relative;
 }
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+.btn-playback {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #2a2a3e;
+  color: #ccc;
+  border: 1px solid #444;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-playback:hover { background: #3a3a5e; }
+.speed-label {
+  color: #888;
+  font-size: 0.85rem;
+  margin-left: 8px;
+}
+.btn-speed {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #2a2a3e;
+  color: #ccc;
+  border: 1px solid #444;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.btn-speed:hover { background: #3a3a5e; }
+.btn-speed.active { background: #4a6cf7; color: #fff; border-color: #4a6cf7; }
+
 .subtitle-bar {
   display: flex;
   align-items: center;
