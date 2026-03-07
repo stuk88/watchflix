@@ -61,7 +61,7 @@ async function extractTmdbFrom123(sourceUrl) {
 
     await page.route('**/*', async (route) => {
       const url = route.request().url();
-      const match = url.match(/(?:embos\.net|vsembed\.ru|(?:new\.)?vidnest\.fun)\/(?:movie|embed\/movie)\/?\??(?:mid=)?(\d{3,})/);
+      const match = url.match(/(?:embos\.net|vsembed\.ru|(?:new\.)?vidnest\.fun)\/(?:movie|tv|embed\/(?:movie|tv))\/?\??(?:mid=)?(\d{3,})/);
       if (match && !tmdbId) {
         tmdbId = match[1];
         console.log(`[extractor] Found TMDB ID: ${tmdbId}`);
@@ -105,7 +105,23 @@ export async function extractStreamUrl(movieId, server = 2) {
 
   // Step 1: Get TMDB ID
   const tmdbId = await getTmdbId(movie.imdb_id, movie.source_url);
-  if (!tmdbId) throw new Error('Could not resolve TMDB ID for ' + movie.title);
+  if (!tmdbId) {
+    const isTv = /season/i.test(movie.source_url || '') || /season/i.test(movie.title || '');
+    if (isTv) throw new Error(`TV shows not fully supported: could not resolve TMDB ID for "${movie.title}"`);
+    throw new Error('Could not resolve TMDB ID for ' + movie.title);
+  }
+
+  // Detect TV show by presence of "season" in source_url or title
+  const isTvShow = /season/i.test(movie.source_url || '') || /season/i.test(movie.title || '');
+
+  // Parse season number from source_url (e.g. "season-2" → 2), default to 1
+  const seasonMatch = (movie.source_url || '').match(/season[- ]?(\d+)/i);
+  const season = seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
+  const episode = 1; // Default to episode 1
+
+  if (isTvShow) {
+    console.log(`[extractor] TV show detected — season ${season}, episode ${episode}`);
+  }
 
   console.log(`[extractor] Streaming ${movie.title} (TMDB: ${tmdbId}, server: ${server})`);
 
@@ -163,7 +179,9 @@ export async function extractStreamUrl(movieId, server = 2) {
       }
     });
 
-    const embosUrl = `https://embos.net/movie/?mid=${tmdbId}`;
+    const embosUrl = isTvShow
+      ? `https://embos.net/tv/?mid=${tmdbId}&season=${season}&episode=${episode}`
+      : `https://embos.net/movie/?mid=${tmdbId}`;
     await page.goto(embosUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
