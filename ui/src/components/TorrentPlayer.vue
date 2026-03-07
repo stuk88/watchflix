@@ -59,6 +59,7 @@
         <button class="btn btn-sync" @click="adjustOffset(0.5)">+0.5s</button>
         <button class="btn btn-sync" @click="adjustOffset(5)">+5s</button>
         <button class="btn btn-sync btn-sync-reset" @click="adjustOffset(-subOffset)">Reset</button>
+        <span v-if="syncStatus" class="sync-status">{{ syncStatus }}</span>
       </div>
       <!-- Torrent filename -->
       <div v-if="torrentFilename" class="torrent-filename">📁 {{ torrentFilename }}</div>
@@ -142,7 +143,9 @@ const pickerFiles = ref([]);
 const activeSubUrl = ref(null);
 const torrentFilename = ref('');
 const subOffset = ref(0);
-const syncing = ref(false);let subtitleCues = [];
+const syncing = ref(false);
+const syncStatus = ref('');
+let subtitleCues = [];
 let timeUpdateListener = null;
 
 function formatSpeed(bytes) {
@@ -294,26 +297,52 @@ function adjustOffset(delta) {
 
 async function autoSync() {
   if (!activeSubUrl.value || syncing.value) return;
+  const currentTime = videoEl.value?.currentTime ?? 0;
+  if (currentTime < 10) {
+    alert('Whisper sync requires at least 10 seconds of playback. Seek forward and try again.');
+    return;
+  }
+
   syncing.value = true;
-  subOffset.value = 0;
+  syncStatus.value = '';
+
+  // Send a window of ~100 subtitle cues centered around the estimated current position
+  const estimatedSubTime = currentTime - subOffset.value;
+  const sorted = [...subtitleCues].sort((a, b) => Math.abs(a.start - estimatedSubTime) - Math.abs(b.start - estimatedSubTime));
+  const cueWindow = sorted.slice(0, 100).map(c => ({ start: c.start, end: c.end, text: c.text }));
 
   try {
-    const { data: syncedVtt } = await axios.post(`/api/movies/${props.movieId}/subtitle-sync`, {
-      subtitleUrl: activeSubUrl.value,
-    }, { responseType: 'text', timeout: 130000 });
+    const { data } = await axios.post(`/api/movies/${props.movieId}/whisper-sync`, {
+      currentTime,
+      subtitleCues: cueWindow,
+    }, { timeout: 120000 });
 
-    // Replace current cues with synced version
-    clearSubtitleListener();
-    subtitleCues = parseVTT(syncedVtt);
-    timeUpdateListener = () => {
-      const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
-      const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
-      currentSubtitleText.value = cue ? cue.text : '';
-    };
-    videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+    subOffset.value = Math.round(data.offset * 10) / 10;
+    const pct = Math.round(data.confidence * 100);
+    syncStatus.value = `Synced: ${subOffset.value >= 0 ? '+' : ''}${subOffset.value.toFixed(1)}s (${pct}% confidence)`;
+    // Clear status after 5 seconds
+    setTimeout(() => { syncStatus.value = ''; }, 5000);
   } catch (err) {
-    console.error('[auto-sync] Failed:', err);
-    alert('Auto sync failed: ' + (err.response?.data?.error || err.message));
+    console.error('[whisper-sync] Failed:', err);
+    // Fall back to ffsubsync if whisper fails
+    try {
+      const { data: syncedVtt } = await axios.post(`/api/movies/${props.movieId}/subtitle-sync`, {
+        subtitleUrl: activeSubUrl.value,
+      }, { responseType: 'text', timeout: 130000 });
+      clearSubtitleListener();
+      subtitleCues = parseVTT(syncedVtt);
+      timeUpdateListener = () => {
+        const time = (videoEl.value?.currentTime ?? 0) + subOffset.value;
+        const cue = subtitleCues.find(c => time >= c.start && time <= c.end);
+        currentSubtitleText.value = cue ? cue.text : '';
+      };
+      videoEl.value?.addEventListener('timeupdate', timeUpdateListener);
+      syncStatus.value = 'Synced (ffsubsync fallback)';
+      setTimeout(() => { syncStatus.value = ''; }, 5000);
+    } catch (fallbackErr) {
+      console.error('[auto-sync] Fallback also failed:', fallbackErr);
+      alert('Auto sync failed: ' + (err.response?.data?.error || err.message));
+    }
   } finally {
     syncing.value = false;
   }
@@ -622,6 +651,12 @@ onUnmounted(() => {
 .btn-sync-reset {
   margin-left: 4px;
   color: var(--text-muted);
+}
+.sync-status {
+  font-size: 11px;
+  color: var(--accent, #77be41);
+  margin-left: 8px;
+  opacity: 0.9;
 }
 .torrent-info {
   display: flex;
