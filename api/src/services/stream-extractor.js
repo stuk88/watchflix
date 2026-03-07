@@ -100,7 +100,7 @@ export async function extractStreamUrl(movieId, server = 2) {
   const cached = cache.get(cacheKey);
   if (cached && cached.expiry > Date.now()) return cached;
 
-  const movie = db.prepare('SELECT imdb_id, source_url, title, year FROM movies WHERE id = ?').get(movieId);
+  const movie = db.prepare('SELECT imdb_id, series_imdb_id, source_url, title, year, type, season, episode FROM movies WHERE id = ?').get(movieId);
   if (!movie) throw new Error('Movie not found');
 
   // Step 1: Get TMDB ID
@@ -111,13 +111,19 @@ export async function extractStreamUrl(movieId, server = 2) {
     throw new Error('Could not resolve TMDB ID for ' + movie.title);
   }
 
-  // Detect TV show by presence of "season" in source_url or title
-  const isTvShow = /season/i.test(movie.source_url || '') || /season/i.test(movie.title || '');
+  // Detect TV show by type column (preferred) or fallback to regex on source_url/title
+  const isTvShow = movie.type === 'series' || /season/i.test(movie.source_url || '') || /season/i.test(movie.title || '');
 
-  // Parse season number from source_url (e.g. "season-2" → 2), default to 1
-  const seasonMatch = (movie.source_url || '').match(/season[- ]?(\d+)/i);
-  const season = seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
-  const episode = 1; // Default to episode 1
+  // Use season/episode from DB columns if available, otherwise parse from source_url
+  let season, episode;
+  if (movie.season != null) {
+    season = movie.season;
+    episode = movie.episode ?? 1;
+  } else {
+    const seasonMatch = (movie.source_url || '').match(/season[- ]?(\d+)/i);
+    season = seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
+    episode = 1; // Default to episode 1 for legacy rows
+  }
 
   if (isTvShow) {
     console.log(`[extractor] TV show detected — season ${season}, episode ${episode}`);
