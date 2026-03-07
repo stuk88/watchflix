@@ -310,19 +310,21 @@ async function autoSync() {
   }
 
   syncing.value = true;
-  syncStatus.value = '';
+  syncStatus.value = 'Listening...';
 
-  // Send a window of ~100 subtitle cues centered around the estimated current position
-  const estimatedSubTime = currentTime - subOffset.value;
-  const sorted = [...subtitleCues].sort((a, b) => Math.abs(a.start - estimatedSubTime) - Math.abs(b.start - estimatedSubTime));
-  const cueWindow = sorted.slice(0, 100).map(c => ({ start: c.start, end: c.end, text: c.text }));
+  // Send ALL subtitle cues — offset might be way off so windowing would miss the match
+  const allCues = subtitleCues.map(c => ({ start: c.start, end: c.end, text: c.text }));
+
+  // Determine subtitle language label
+  const subTrack = subtitleTracks.value.find(t => t.language === currentSubtitle.value);
+  const subLang = subTrack?.label || subTrack?.language || 'English';
 
   try {
     const { data } = await axios.post(`/api/movies/${props.movieId}/whisper-sync`, {
       currentTime,
-      subtitleCues: cueWindow,
-      subtitleLanguage: currentSubtitle.value ? subtitleTracks.value.find(t => t.language === currentSubtitle.value)?.label : 'English',
-    }, { timeout: 120000 });
+      subtitleCues: allCues,
+      subtitleLanguage: subLang,
+    }, { timeout: 180000 });
 
     subOffset.value = Math.round(data.offset * 10) / 10;
     const pct = Math.round(data.confidence * 100);

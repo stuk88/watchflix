@@ -496,9 +496,11 @@ router.post('/:id/whisper-sync', async (req, res) => {
     const fullWhisperText = whisperTranscript.map(s => s.text).join(' ');
     console.log(`[whisper-sync] Detected language: ${detectedLanguage}, transcript: "${fullWhisperText.substring(0, 100)}..."`);
 
-    // If subtitle language differs from detected spoken language, translate via GPT
-    const subLang = (subtitleLanguage || 'en').toLowerCase();
-    const needsTranslation = detectedLanguage !== subLang && detectedLanguage !== 'en' && subLang !== detectedLanguage;
+    // Map common language labels to ISO codes for comparison
+    const langLabelToCode = { english: 'en', japanese: 'ja', spanish: 'es', french: 'fr', german: 'de', portuguese: 'pt', italian: 'it', chinese: 'zh', korean: 'ko', arabic: 'ar', russian: 'ru', hebrew: 'he', dutch: 'nl', polish: 'pl', turkish: 'tr', swedish: 'sv', norwegian: 'no', danish: 'da', finnish: 'fi', czech: 'cs', romanian: 'ro', hungarian: 'hu', greek: 'el', thai: 'th', vietnamese: 'vi', indonesian: 'id', malay: 'ms', hindi: 'hi' };
+    const rawSubLang = (subtitleLanguage || 'en').toLowerCase();
+    const subLangCode = langLabelToCode[rawSubLang] || rawSubLang;
+    const needsTranslation = detectedLanguage !== subLangCode;
     
     let matchSegments = whisperTranscript;
     
