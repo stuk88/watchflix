@@ -466,10 +466,22 @@ router.post('/:id/whisper-sync', async (req, res) => {
       audioWav,
     ], { timeout: 60000 });
 
-    console.log('[whisper-sync] Running Whisper transcription (1 minute chunk)...');
+    // Determine if we need translation (subtitle language != spoken language)
+    // We'll run Whisper twice if needed: once to detect language, then with --task translate
+    const subLangLabel = (subtitleLanguage || 'English').toLowerCase();
+    const langLabelToCode = { english: 'en', japanese: 'ja', spanish: 'es', french: 'fr', german: 'de', portuguese: 'pt', italian: 'it', chinese: 'zh', korean: 'ko', arabic: 'ar', russian: 'ru', hebrew: 'he', dutch: 'nl', polish: 'pl', turkish: 'tr', swedish: 'sv', norwegian: 'no', danish: 'da', finnish: 'fi', czech: 'cs', romanian: 'ro', hungarian: 'hu', greek: 'el', thai: 'th', vietnamese: 'vi', indonesian: 'id', malay: 'ms', hindi: 'hi' };
+    const subLangCode = langLabelToCode[subLangLabel] || subLangLabel;
+
+    // Use --task translate to get English output from any language (Whisper translates to English natively)
+    // If subtitles are in English, this gives us a direct match
+    // If subtitles are non-English, we do normal transcription and match in the original language
+    const useTranslate = subLangCode === 'en';
+
+    console.log(`[whisper-sync] Running Whisper ${useTranslate ? 'translate (→ English)' : 'transcribe'} on 1 minute chunk...`);
     await execFileAsync(whisperPath, [
       audioWav,
       '--model', 'base',
+      ...(useTranslate ? ['--task', 'translate'] : []),
       '--output_format', 'json',
       '--output_dir', tmpDir,
     ], { timeout: 120000 });
@@ -497,48 +509,8 @@ router.post('/:id/whisper-sync', async (req, res) => {
     console.log(`[whisper-sync] Detected language: ${detectedLanguage}, transcript: "${fullWhisperText.substring(0, 100)}..."`);
 
     // Map common language labels to ISO codes for comparison
-    const langLabelToCode = { english: 'en', japanese: 'ja', spanish: 'es', french: 'fr', german: 'de', portuguese: 'pt', italian: 'it', chinese: 'zh', korean: 'ko', arabic: 'ar', russian: 'ru', hebrew: 'he', dutch: 'nl', polish: 'pl', turkish: 'tr', swedish: 'sv', norwegian: 'no', danish: 'da', finnish: 'fi', czech: 'cs', romanian: 'ro', hungarian: 'hu', greek: 'el', thai: 'th', vietnamese: 'vi', indonesian: 'id', malay: 'ms', hindi: 'hi' };
-    const rawSubLang = (subtitleLanguage || 'en').toLowerCase();
-    const subLangCode = langLabelToCode[rawSubLang] || rawSubLang;
-    const needsTranslation = detectedLanguage !== subLangCode;
-    
-    let matchSegments = whisperTranscript;
-    
-    if (needsTranslation && config.openaiApiKey) {
-      console.log(`[whisper-sync] Translating from ${detectedLanguage} to ${subLang} via GPT...`);
-      try {
-        const { default: axios } = await import('axios');
-        const gptResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
-          model: 'gpt-4o-mini',
-          messages: [{
-            role: 'system',
-            content: `Translate the following transcript segments to ${subtitleLanguage || 'English'}. Return a JSON array of objects with "start", "end", "text" fields. Keep the start/end times exactly as given. Only translate the text field. Return ONLY the JSON array, no markdown.`
-          }, {
-            role: 'user',
-            content: JSON.stringify(whisperTranscript)
-          }],
-          temperature: 0.1,
-        }, {
-          headers: {
-            'Authorization': `Bearer ${config.openaiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 30000,
-        });
-
-        const gptText = gptResponse.data.choices[0].message.content.trim();
-        // Parse JSON, strip markdown code fences if present
-        const cleanJson = gptText.replace(/^```json?\n?/m, '').replace(/\n?```$/m, '');
-        const translated = JSON.parse(cleanJson);
-        if (Array.isArray(translated) && translated.length > 0) {
-          matchSegments = translated;
-          console.log(`[whisper-sync] Translated ${translated.length} segments`);
-        }
-      } catch (translateErr) {
-        console.error('[whisper-sync] Translation failed, matching with original:', translateErr.message);
-        // Fall back to original whisper text
-      }
-    }
+        // Whisper already translates to English via --task translate when needed
+    // No external API calls required
 
     // Normalize text for fuzzy matching
     function normalizeText(text) {
@@ -558,7 +530,7 @@ router.post('/:id/whisper-sync', async (req, res) => {
     let bestSegment = null;
     let bestSubCue = null;
 
-    for (const seg of matchSegments) {
+    for (const seg of whisperTranscript) {
       const normSeg = normalizeText(seg.text);
       for (const cue of subtitleCues) {
         const normCue = normalizeText(cue.text);
@@ -592,7 +564,7 @@ router.post('/:id/whisper-sync', async (req, res) => {
       matchedCue: bestSubCue.text,
       matchedCueTime: bestSubCue.start,
       detectedLanguage,
-      translated: needsTranslation,
+      usedTranslation: useTranslate,
     });
   } catch (err) {
     console.error('[whisper-sync] Error:', err.message);
