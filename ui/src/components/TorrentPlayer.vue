@@ -6,7 +6,7 @@
       <div class="start-quality" v-if="quality">{{ quality }}</div>
     </div>
     <div v-else>
-      <div class="video-wrap">
+      <div class="video-wrap" ref="videoWrap">
         <video
           ref="videoEl"
           controls
@@ -14,6 +14,7 @@
           class="player-video"
           :src="streamUrl"
           @error="onVideoError"
+          @dblclick="toggleFullscreen"
         ></video>
         <div v-if="currentSubtitleText" class="subtitle-overlay" v-html="currentSubtitleText"></div>
       </div>
@@ -100,7 +101,7 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, computed } from 'vue';
+import { ref, onUnmounted, onMounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from 'axios';
 
@@ -113,6 +114,7 @@ const props = defineProps({
 const router = useRouter();
 const started = ref(false);
 const videoEl = ref(null);
+const videoWrap = ref(null);
 const downloadSpeed = ref('0 KB/s');
 const uploadSpeed = ref('0 KB/s');
 const peerCount = ref(0);
@@ -386,6 +388,40 @@ async function removeMovie() {
   router.push('/');
 }
 
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else if (videoWrap.value) {
+    videoWrap.value.requestFullscreen();
+  }
+}
+
+// Intercept native fullscreen from video controls to fullscreen the wrapper instead
+onMounted(() => {
+  // Listen for the video element trying to go fullscreen
+  const observer = new MutationObserver(() => {
+    if (document.fullscreenElement === videoEl.value && videoWrap.value) {
+      document.exitFullscreen().then(() => {
+        videoWrap.value.requestFullscreen();
+      }).catch(() => {});
+    }
+  });
+
+  // Use fullscreenchange to intercept
+  const handleFullscreen = () => {
+    if (document.fullscreenElement === videoEl.value && videoWrap.value) {
+      document.exitFullscreen().then(() => {
+        videoWrap.value.requestFullscreen();
+      }).catch(() => {});
+    }
+  };
+  document.addEventListener('fullscreenchange', handleFullscreen);
+
+  onUnmounted(() => {
+    document.removeEventListener('fullscreenchange', handleFullscreen);
+  });
+});
+
 onUnmounted(() => {
   clearSubtitleListener();
   if (statsInterval) clearInterval(statsInterval);
@@ -431,6 +467,19 @@ onUnmounted(() => {
 }
 .video-wrap {
   position: relative;
+}
+.video-wrap:fullscreen {
+  background: #000;
+}
+.video-wrap:fullscreen .player-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 0;
+}
+.video-wrap:fullscreen .subtitle-overlay {
+  font-size: 24px;
+  bottom: 80px;
 }
 .subtitle-overlay {
   position: absolute;

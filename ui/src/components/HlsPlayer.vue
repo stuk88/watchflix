@@ -10,12 +10,13 @@
         <div class="spinner"></div>
         <div class="loading-text">{{ loadingText }}</div>
       </div>
-      <div v-show="!loading && !error" class="video-wrap">
+      <div v-show="!loading && !error" class="video-wrap" ref="videoWrap">
         <video
           ref="videoEl"
           controls
           autoplay
           class="player-video"
+          @dblclick="toggleFullscreen"
         ></video>
         <!-- Custom subtitle overlay (works with hls.js which ignores <track> elements) -->
         <div v-if="currentSubtitleText" class="subtitle-overlay" v-html="currentSubtitleText"></div>
@@ -98,7 +99,7 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, nextTick } from 'vue';
+import { ref, onUnmounted, onMounted, nextTick } from 'vue';
 import axios from 'axios';
 
 const props = defineProps({
@@ -110,6 +111,7 @@ const loading = ref(false);
 const loadingText = ref('Extracting stream...');
 const error = ref(null);
 const videoEl = ref(null);
+const videoWrap = ref(null);
 const servers = ref([]);
 const currentServer = ref(2);
 const subtitleTracks = ref([]);
@@ -338,6 +340,28 @@ async function switchServer(serverId) {
   await loadStream(serverId);
 }
 
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else if (videoWrap.value) {
+    videoWrap.value.requestFullscreen();
+  }
+}
+
+onMounted(() => {
+  const handleFullscreen = () => {
+    if (document.fullscreenElement === videoEl.value && videoWrap.value) {
+      document.exitFullscreen().then(() => {
+        videoWrap.value.requestFullscreen();
+      }).catch(() => {});
+    }
+  };
+  document.addEventListener('fullscreenchange', handleFullscreen);
+  onUnmounted(() => {
+    document.removeEventListener('fullscreenchange', handleFullscreen);
+  });
+});
+
 onUnmounted(() => {
   clearSubtitleListener();
   if (hls) {
@@ -404,6 +428,19 @@ onUnmounted(() => {
 }
 .video-wrap {
   position: relative;
+}
+.video-wrap:fullscreen {
+  background: #000;
+}
+.video-wrap:fullscreen .player-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 0;
+}
+.video-wrap:fullscreen .subtitle-overlay {
+  font-size: 24px;
+  bottom: 80px;
 }
 .player-video {
   width: 100%;
