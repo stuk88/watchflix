@@ -8,6 +8,7 @@ export const useMoviesStore = defineStore('movies', {
     page: 1,
     pages: 0,
     loading: false,
+    initialized: false,
     scraping: false,
     filters: {
       sort: 'added_at',
@@ -37,6 +38,7 @@ export const useMoviesStore = defineStore('movies', {
         console.error('Failed to fetch movies:', err);
       } finally {
         this.loading = false;
+        this.initialized = true;
       }
     },
 

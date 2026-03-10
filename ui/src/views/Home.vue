@@ -4,7 +4,7 @@
 
     <div v-if="store.loading" class="loading">Loading movies...</div>
 
-    <div v-else-if="store.movies.length === 0" class="empty-state">
+    <div v-else-if="store.initialized && store.movies.length === 0" class="empty-state">
       <div class="emoji">🎬</div>
       <p>No movies yet. Click <strong>🔄 Update</strong> to scrape movies!</p>
     </div>
