@@ -1,0 +1,14 @@
+{
+  "name": "watchflix-desktop",
+  "version": "1.0.0",
+  "description": "Watchflix desktop app",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron main.js",
+    "build": "electron-builder --config electron-builder.yml"
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}

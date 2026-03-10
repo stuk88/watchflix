@@ -16,6 +16,12 @@ app.use('/api', requireAuth);
 app.use('/api/movies', moviesRouter);
 app.use('/api/scrape', sourcesRouter);
 
+// Serve the built UI when bundled with the desktop app (UI_DIST is set by the Electron main process).
+if (process.env.UI_DIST) {
+  app.use(express.static(process.env.UI_DIST));
+  app.get('*', (_, res) => res.sendFile(`${process.env.UI_DIST}/index.html`));
+}
+
 app.listen(config.port, () => {
   console.log(`[watchflix-api] Running on http://localhost:${config.port}`);
   startScheduler();

@@ -1,0 +1,32 @@
+appId: com.watchflix.desktop
+productName: Watchflix
+
+directories:
+  output: dist
+
+# Only pack the Electron main script; everything else ships as extraResources
+files:
+  - main.js
+
+extraResources:
+  # API source + node_modules (node_modules are needed at runtime)
+  - from: ../api
+    to: api
+    filter:
+      - "**/*"
+      - "!tests/**"
+      - "!.env*"
+  # Pre-built UI assets (run `npm run build -w ui` before packaging)
+  - from: ../ui/dist
+    to: ui-dist
+
+mac:
+  category: public.app-category.entertainment
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+# Rebuild native modules (e.g. better-sqlite3) against Electron's Node version
+npmRebuild: true

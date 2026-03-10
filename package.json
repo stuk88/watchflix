@@ -1,11 +1,13 @@
 {
   "name": "watchflix",
   "private": true,
-  "workspaces": ["api", "ui"],
+  "workspaces": ["api", "ui", "desktop"],
   "scripts": {
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:ui\"",
     "dev:api": "npm run dev -w api",
-    "dev:ui": "npm run dev -w ui"
+    "dev:ui": "npm run dev -w ui",
+    "desktop:dev": "concurrently \"npm run dev:ui\" \"npm run dev -w desktop\"",
+    "desktop:build": "npm run build -w ui && npm run build -w desktop"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
