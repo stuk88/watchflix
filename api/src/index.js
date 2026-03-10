@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import config from './config.js';
+import { requireAuth } from './middleware/auth.js';
 import moviesRouter from './routes/movies.js';
 import sourcesRouter from './routes/sources.js';
 import { startScheduler } from './services/scheduler.js';
@@ -11,6 +12,7 @@ app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
+app.use('/api', requireAuth);
 app.use('/api/movies', moviesRouter);
 app.use('/api/scrape', sourcesRouter);
 
