@@ -1,8 +1,36 @@
+export const proxyAllowedDomains = [
+  'embos.net',
+  'vsembed.ru',
+  'vidnest.fun',
+  'mcloud.bz',
+  'rabbitstream.net',
+  'dokicloud.one',
+  'megacloud.tv',
+  'rapid-cloud.co',
+  'opensubtitles.com',
+  'dl.opensubtitles.org',
+  'vip.openbullet.dev',
+];
+
+/** Returns true if the URL's hostname matches an allowed domain (including subdomains). */
+export function isAllowedProxyUrl(url) {
+  let hostname;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  return proxyAllowedDomains.some(
+    domain => hostname === domain || hostname.endsWith(`.${domain}`)
+  );
+}
+
 export default {
   port: process.env.PORT || 3001,
   omdbApiKey: process.env.OMDB_API_KEY || 'b43344b2',
   opensubtitlesApiKey: process.env.OPENSUBTITLES_API_KEY || '',
   openaiApiKey: process.env.OPENAI_API_KEY || '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',
+  authToken: process.env.WATCHFLIX_AUTH_TOKEN || '',
   minImdbRating: 6.0,
   sources: {
     movies123: 'https://ww6.123movieshd.com',

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import axios from 'axios';
 import db from '../db.js';
-import config from '../config.js';
+import config, { isAllowedProxyUrl } from '../config.js';
 import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats } from '../services/streamer.js';
 import { extractStreamUrl, getAvailableServers } from '../services/stream-extractor.js';
@@ -650,6 +650,11 @@ router.get('/:id/123proxy', async (req, res) => {
 
   try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
 
+  if (!isAllowedProxyUrl(url)) {
+    console.error('[123proxy] Blocked SSRF attempt to:', new URL(url).hostname);
+    return res.status(403).json({ error: 'Domain not allowed' });
+  }
+
   try {
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
@@ -730,6 +735,13 @@ router.get('/:id/subtitles', async (req, res) => {
 router.get('/:id/subtitle-proxy', async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).json({ error: 'Missing url param' });
+
+  if (!isAllowedProxyUrl(url)) {
+    let hostname = '';
+    try { hostname = new URL(url).hostname; } catch {}
+    console.error('[subtitle-proxy] Blocked SSRF attempt to:', hostname || url.substring(0, 60));
+    return res.status(403).json({ error: 'Domain not allowed' });
+  }
 
   try {
     const vttText = await fetchAndConvertSubtitle(url);
