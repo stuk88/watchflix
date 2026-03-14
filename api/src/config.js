@@ -1,7 +1,14 @@
 export const proxyAllowedDomains = [
+  'netoda.tech',       // Current 123movies embed hub
   'embos.net',
   'vsembed.ru',
   'vidnest.fun',
+  'vidsrc.cc',
+  'vidlink.pro',
+  'vidfast.pro',
+  'videasy.net',
+  'vidzee.wtf',
+  'player.videasy.net',
   'mcloud.bz',
   'rabbitstream.net',
   'dokicloud.one',

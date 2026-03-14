@@ -25,17 +25,23 @@ test.describe.serial('123movies scrape and play', () => {
   let movie123;
 
   test.beforeAll(async ({ request }) => {
-    // Use movie id=1 (Tron: Ares) directly — has tmdb_id=533533 cached, source='both',
-    // so TMDB resolution is skipped and HLS extraction goes straight to vidnest.fun.
-    const res = await request.get(`${API}/movies/1`);
-    expect(res.ok(), 'GET /api/movies/1 should return 200').toBeTruthy();
+    // Pick any non-series 123movies movie with a source_url.
+    // We no longer rely on tmdb_id being pre-cached since the extractor now loads
+    // the 123movies source page directly (embos.net was replaced by netoda.tech).
+    const listRes = await request.get(`${API}/movies?limit=100&source=123movies&type=movie`);
+    expect(listRes.ok(), 'GET /api/movies should return 200').toBeTruthy();
 
-    movie123 = await res.json();
+    const body = await listRes.json();
+    const candidates = (body.movies ?? body).filter(
+      m => (m.source === '123movies' || m.source === 'both') &&
+           m.source_url &&
+           m.source_url.includes('123movieshd.com/film/') &&
+           m.type !== 'series'
+    );
 
-    expect(
-      movie123.source === '123movies' || movie123.source === 'both',
-      `Movie id=1 must have source '123movies' or 'both' (got '${movie123.source}')`
-    ).toBeTruthy();
+    expect(candidates.length, 'Must have at least one 123movies movie candidate').toBeGreaterThan(0);
+
+    movie123 = candidates[0];
     console.log(`[beforeAll] Using movie: "${movie123.title}" (id=${movie123.id}, source=${movie123.source})`);
   });
 
@@ -50,9 +56,12 @@ test.describe.serial('123movies scrape and play', () => {
     expect(from123.length, 'Should have at least one 123movies movie').toBeGreaterThan(0);
     console.log(`[test 1] Found ${from123.length} movies from 123movies source`);
 
-    const m = from123[0];
+    // Pick the first movie (not a series episode) to check imdb_id format.
+    // Series episodes use series_imdb_id instead of imdb_id.
+    const m = from123.find(x => x.type !== 'series') ?? from123[0];
     expect(m.title, 'Movie must have a title').toBeTruthy();
-    expect(m.imdb_id, 'imdb_id must match tt\\d+ format').toMatch(/^tt\d+$/);
+    const effectiveImdbId = m.imdb_id ?? m.series_imdb_id;
+    expect(effectiveImdbId, 'imdb_id or series_imdb_id must match tt\\d+ format').toMatch(/^tt\d+$/);
     expect(m.source_url, 'source_url must point to 123movieshd.com').toContain('123movieshd.com/film/');
     expect(m.imdb_rating, 'imdb_rating must be >= 6.0').toBeGreaterThanOrEqual(6.0);
   });
