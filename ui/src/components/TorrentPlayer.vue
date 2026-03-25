@@ -50,7 +50,10 @@
           :class="{ active: activeSubUrl === file.url }"
           @click="selectSubtitleFile(file)"
         >
-          <span class="sub-filename">{{ file.filename }}</span>
+          <span class="sub-filename">
+            {{ file.filename }}
+            <span v-if="file.isBestMatch" class="best-match-badge">★ Best match</span>
+          </span>
           <span v-if="file.downloads >= 0" class="sub-downloads">{{ file.downloads.toLocaleString() }} downloads</span>
           <span v-else class="sub-downloads">📦 from torrent</span>
         </button>
@@ -249,6 +252,23 @@ function clearSubtitleTrack() {
   subtitleCues = [];
 }
 
+function dotSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const partsA = a.toLowerCase().replace(/\.[^.]+$/, '').split('.');
+  const partsB = b.toLowerCase().replace(/\.[^.]+$/, '').split('.');
+  const setB = new Set(partsB);
+  return partsA.filter(p => p.length > 1 && setB.has(p)).length;
+}
+
+function markBestMatch(files, referenceFilename) {
+  if (!referenceFilename || files.length <= 1) return files;
+  const scores = files.map(f => dotSimilarity(f.filename, referenceFilename));
+  const maxScore = Math.max(...scores);
+  if (maxScore === 0) return files;
+  const bestIdx = scores.indexOf(maxScore);
+  return files.map((f, i) => ({ ...f, isBestMatch: i === bestIdx }));
+}
+
 function toggleLangPicker(lang) {
   const track = subtitleTracks.value.find(t => t.language === lang);
   if (!track) return;
@@ -261,9 +281,9 @@ function toggleLangPicker(lang) {
     return;
   }
 
-  // Multiple files — show picker
+  // Multiple files — show picker, mark best match by filename similarity
   currentSubtitle.value = lang;
-  pickerFiles.value = track.files;
+  pickerFiles.value = markBestMatch(track.files, torrentFilename.value);
   showSubPicker.value = true;
 }
 
@@ -587,6 +607,22 @@ onUnmounted(() => {
 .btn-sub-file.active .sub-downloads { color: rgba(0,0,0,0.6); }
 .sub-filename {
   word-break: break-all;
+}
+.best-match-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(119,190,65,0.2);
+  color: var(--accent, #77be41);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.btn-sub-file.active .best-match-badge {
+  background: rgba(0,0,0,0.2);
+  color: rgba(0,0,0,0.7);
 }
 .sub-downloads {
   font-size: 10px;
