@@ -1,6 +1,8 @@
 import axios from 'axios';
 import zlib from 'zlib';
 import { promisify } from 'util';
+import jschardet from 'jschardet';
+import iconv from 'iconv-lite';
 import db from '../db.js';
 
 // OpenSubtitles REST API v1 (free, no API key required)
@@ -136,7 +138,13 @@ export async function fetchAndConvertSubtitle(url) {
     buffer = await gunzip(buffer);
   }
 
-  const text = buffer.toString('utf-8');
+  // Detect encoding and decode to UTF-8 string
+  const detected = jschardet.detect(buffer);
+  const encoding = (detected?.encoding && detected.encoding !== 'ascii')
+    ? detected.encoding
+    : 'utf-8';
+  console.log(`[subtitles] Detected encoding: ${encoding} (confidence: ${(detected?.confidence * 100 || 0).toFixed(0)}%)`);
+  const text = iconv.decode(buffer, encoding);
   const isVtt = text.trimStart().startsWith('WEBVTT');
   return isVtt ? text : srtToVtt(text);
 }
