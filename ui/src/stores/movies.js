@@ -8,6 +8,7 @@ export const useMoviesStore = defineStore('movies', {
     page: 1,
     pages: 0,
     loading: false,
+    loadingMore: false,
     initialized: false,
     scraping: false,
     filters: {
@@ -39,6 +40,26 @@ export const useMoviesStore = defineStore('movies', {
       } finally {
         this.loading = false;
         this.initialized = true;
+      }
+    },
+
+    async fetchMoreMovies() {
+      if (this.loadingMore || this.page >= this.pages) return;
+      this.loadingMore = true;
+      try {
+        const nextPage = this.page + 1;
+        const params = { page: nextPage, limit: 40, ...this.filters };
+        if (!params.genre) delete params.genre;
+        if (params.source === 'all') delete params.source;
+        if (params.type === 'all') delete params.type;
+        const { data } = await axios.get('/api/movies', { params });
+        this.movies = [...this.movies, ...data.movies];
+        this.page = data.page;
+        this.pages = data.pages;
+      } catch (err) {
+        console.error('Failed to fetch more movies:', err);
+      } finally {
+        this.loadingMore = false;
       }
     },
 
