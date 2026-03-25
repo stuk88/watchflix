@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="content">
     <h2 style="margin-bottom: 24px; font-weight: 700; color: #aaa;">🙈 Hidden Movies</h2>
 
     <div v-if="loading" class="loading">Loading hidden movies...</div>

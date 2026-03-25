@@ -20,7 +20,7 @@
         </button>
       </nav>
     </header>
-    <main class="content">
+    <main>
       <router-view />
     </main>
   </div>

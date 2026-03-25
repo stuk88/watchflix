@@ -1,5 +1,5 @@
 <template>
-  <div class="movie-detail" v-if="movie">
+  <div class="content movie-detail" v-if="movie">
     <router-link to="/" class="back-link">← Back to movies</router-link>
 
     <div class="movie-hero">
@@ -79,6 +79,10 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- Player section — full width, outside the max-width constraint -->
+  <div v-if="movie" class="player-section">
     <!-- Source Tabs -->
     <div class="source-tabs" v-if="hasBothSources">
       <button class="source-tab" :class="{ active: activeTab === '123movies' }" @click="activeTab = '123movies'">
@@ -89,9 +93,9 @@
       </button>
     </div>
 
-    <!-- 123Movies HLS Player -->
+    <!-- 123Movies Iframe Player -->
     <div v-if="show123">
-      <HlsPlayer :movie-id="activeEpisodeId" />
+      <IframePlayer :movie-id="activeEpisodeId" />
     </div>
 
     <!-- Torrent Player -->
@@ -102,7 +106,7 @@
     <!-- Single source -->
     <div v-if="!hasBothSources">
       <div v-if="activeEpisode.source_url && activeEpisode.source !== 'torrent'">
-        <HlsPlayer :movie-id="activeEpisodeId" />
+        <IframePlayer :movie-id="activeEpisodeId" />
       </div>
       <TorrentPlayer v-else-if="activeEpisode.torrent_magnet" :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
       <div v-else class="empty-state">
@@ -111,7 +115,7 @@
     </div>
   </div>
 
-  <div v-else class="loading">Loading movie...</div>
+  <div v-else class="content loading">Loading movie...</div>
 </template>
 
 <script setup>
@@ -119,7 +123,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import axios from 'axios';
 import TorrentPlayer from '../components/TorrentPlayer.vue';
-import HlsPlayer from '../components/HlsPlayer.vue';
+import IframePlayer from '../components/IframePlayer.vue';
 
 const route = useRoute();
 const movie = ref(null);
