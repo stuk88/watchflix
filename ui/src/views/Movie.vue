@@ -95,7 +95,7 @@
 
     <!-- 123Movies Iframe Player -->
     <div v-if="show123">
-      <IframePlayer :movie-id="activeEpisodeId" />
+      <IframePlayer :source-url="activeEpisode.source_url" />
     </div>
 
     <!-- Torrent Player -->
@@ -106,7 +106,7 @@
     <!-- Single source -->
     <div v-if="!hasBothSources">
       <div v-if="activeEpisode.source_url && activeEpisode.source !== 'torrent'">
-        <IframePlayer :movie-id="activeEpisodeId" />
+        <IframePlayer :source-url="activeEpisode.source_url" />
       </div>
       <TorrentPlayer v-else-if="activeEpisode.torrent_magnet" :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
       <div v-else class="empty-state">

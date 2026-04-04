@@ -6,8 +6,11 @@
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:ui\"",
     "dev:api": "npm run dev -w api",
     "dev:ui": "npm run dev -w ui",
-    "desktop:dev": "concurrently \"npm run dev:ui\" \"npm run dev -w desktop\"",
-    "desktop:build": "npm run build -w ui && npm run build -w desktop",
+    "desktop:dev": "concurrently \"npm run dev:api\" \"npm run dev:ui\" \"npm run dev -w desktop\"",
+    "desktop:prebuild": "bash scripts/prebuild-api.sh",
+    "desktop:build": "npm run build -w ui && npm run desktop:prebuild && npm run build -w desktop",
+    "desktop:build:mac": "npm run build -w ui && npm run desktop:prebuild && npm run build:mac -w desktop",
+    "desktop:build:win": "npm run build -w ui && npm run desktop:prebuild && npm run build:win -w desktop",
     "test:e2e": "npm run test:e2e -w desktop"
   },
   "devDependencies": {

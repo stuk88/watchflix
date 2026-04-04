@@ -1,5 +1,6 @@
 appId: com.watchflix.desktop
 productName: Watchflix
+icon: build/icon.png
 
 directories:
   output: dist
@@ -9,13 +10,11 @@ files:
   - main.js
 
 extraResources:
-  # API source + node_modules (node_modules are needed at runtime)
-  - from: ../api
+  # Staged API bundle with standalone node_modules (built by scripts/prebuild-api.sh)
+  - from: .api-bundle
     to: api
     filter:
       - "**/*"
-      - "!tests/**"
-      - "!.env*"
   # Pre-built UI assets (run `npm run build -w ui` before packaging)
   - from: ../ui/dist
     to: ui-dist
@@ -27,6 +26,19 @@ mac:
       arch:
         - x64
         - arm64
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # better-sqlite3 prebuilds cover Windows x64, so no extra config needed
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
 
 # Rebuild native modules (e.g. better-sqlite3) against Electron's Node version
 npmRebuild: true
