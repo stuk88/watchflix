@@ -40,5 +40,18 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
 
+linux:
+  category: AudioVideo
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64
+
 # Rebuild native modules (e.g. better-sqlite3) against Electron's Node version
 npmRebuild: true

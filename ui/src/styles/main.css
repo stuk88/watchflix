@@ -240,6 +240,15 @@ a { color: inherit; text-decoration: none; }
   margin-left: 4px;
 }
 
+.genre-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.85;
+}
+
 /* Rating Badge */
 .rating-badge {
   display: inline-flex;
@@ -607,3 +616,71 @@ a { color: inherit; text-decoration: none; }
 }
 .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
 .btn-outline.active { border-color: #f5c518; color: #f5c518; }
+
+/* ─── Responsive: tablets ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .top-bar {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    gap: 10px;
+  }
+  .search-wrap { order: 3; flex-basis: 100%; max-width: 100%; }
+  .nav-links { gap: 10px; }
+
+  .content { padding: 16px; }
+
+  .movie-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .movie-hero {
+    flex-direction: column;
+    gap: 20px;
+  }
+  .movie-hero .hero-poster { width: 200px; align-self: center; }
+  .movie-hero .hero-title { font-size: 22px; text-align: center; }
+  .movie-hero .hero-meta { justify-content: center; }
+  .ratings-panel { justify-content: center; }
+  .hero-actions { justify-content: center; }
+
+  .filter-bar { gap: 8px; padding: 10px 12px; }
+
+  .source-tabs { flex-wrap: wrap; }
+
+  .episode-list { gap: 6px; }
+  .episode-pill { max-width: 120px; padding: 6px 10px; }
+}
+
+/* ─── Responsive: phones ──────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .top-bar { padding: 8px 10px; gap: 8px; }
+  .logo { font-size: 17px; }
+  .nav-links { gap: 8px; font-size: 12px; }
+  .btn-scrape { padding: 6px 12px; font-size: 12px; }
+
+  .content { padding: 10px; }
+
+  .movie-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 8px;
+  }
+
+  .movie-card .card-title { font-size: 12px; }
+  .movie-card .card-meta { font-size: 10px; gap: 4px; }
+  .movie-card .card-play { width: 40px; height: 40px; }
+
+  .movie-hero .hero-poster { width: 160px; }
+  .movie-hero .hero-title { font-size: 20px; }
+  .movie-hero .hero-plot { font-size: 14px; }
+
+  .rating-item .rating-score { font-size: 16px; }
+  .ratings-panel { gap: 14px; }
+
+  .movie-detail { max-width: 100%; }
+
+  .filter-bar { flex-direction: column; align-items: stretch; }
+  .filter-stats { margin-left: 0; text-align: center; }
+
+  .source-tab { padding: 8px 14px; font-size: 13px; }
+}

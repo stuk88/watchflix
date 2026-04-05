@@ -133,6 +133,12 @@ async function createWindow() {
 
                 .play { width: 100% !important; max-width: 100% !important;
                          background-size: cover !important; }
+
+                /* Hide poster once the video player iframe loads inside #player */
+                .play:has(#player iframe) {
+                  background-image: none !important;
+                  background: #000 !important;
+                }
               \`;
               document.head.appendChild(s);
 
@@ -143,6 +149,18 @@ async function createWindow() {
                 const t = e.target;
                 if (t.tagName === 'A' && t.target === '_blank') { e.preventDefault(); e.stopPropagation(); }
               }, true);
+
+              /* Fallback for poster hide: observe #player for iframe insertion */
+              const playerEl = document.getElementById('player');
+              const playEl = document.querySelector('.play');
+              if (playerEl && playEl) {
+                new MutationObserver(() => {
+                  if (playerEl.querySelector('iframe')) {
+                    playEl.style.backgroundImage = 'none';
+                    playEl.style.background = '#000';
+                  }
+                }).observe(playerEl, { childList: true, subtree: true });
+              }
             })();
           `).catch(() => {});
         }

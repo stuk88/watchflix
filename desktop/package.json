@@ -2,13 +2,18 @@
   "name": "watchflix-desktop",
   "version": "1.0.0",
   "description": "Watchflix desktop app",
-  "author": "Watchflix",
+  "homepage": "https://github.com/stuk88/watchflix",
+  "author": {
+    "name": "Watchflix",
+    "email": "watchflix@stuk88.dev"
+  },
   "main": "main.js",
   "scripts": {
     "dev": "electron main.js",
     "build": "electron-builder --config electron-builder.yml",
     "build:mac": "electron-builder --config electron-builder.yml --mac",
     "build:win": "electron-builder --config electron-builder.yml --win",
+    "build:linux": "electron-builder --config electron-builder.yml --linux",
     "test:e2e": "npx playwright test"
   },
   "devDependencies": {

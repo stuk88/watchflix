@@ -69,4 +69,12 @@ function startPlayer() {
   border: none;
   display: block;
 }
+@media (max-width: 768px) {
+  .player-start { min-height: 200px; }
+  .start-icon { font-size: 36px; }
+  .player-iframe { height: 60vh; }
+}
+@media (max-width: 480px) {
+  .player-iframe { height: 50vh; }
+}
 </style>

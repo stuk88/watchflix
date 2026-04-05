@@ -1,0 +1,16 @@
+{
+	"appId": "com.watchflix.app",
+	"appName": "Watchflix",
+	"webDir": "../ui/dist",
+	"server": {
+		"cleartext": true
+	},
+	"android": {
+		"allowMixedContent": true
+	},
+	"ios": {
+		"contentInset": "automatic",
+		"allowsLinkPreview": false
+	},
+	"packageClassList": []
+}
