@@ -19,7 +19,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 
 const props = defineProps({
   sourceUrl: String,
@@ -40,6 +40,12 @@ const info = computed(() => sourceLabels[props.sourceName] || sourceLabels['123m
 const icon = computed(() => info.value.icon);
 const label = computed(() => info.value.label);
 const qualityLabel = computed(() => info.value.quality);
+
+watch(() => props.sourceUrl, (newUrl, oldUrl) => {
+  if (newUrl !== oldUrl) {
+    started.value = false;
+  }
+});
 
 function startPlayer() {
   started.value = true;

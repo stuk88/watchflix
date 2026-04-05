@@ -85,7 +85,7 @@
   <div v-if="movie" class="player-section">
     <!-- Russian source: direct iframe player -->
     <div v-if="isRussianSource">
-      <IframePlayer :source-url="activeEpisode.source_url" :source-name="movie.source" />
+      <IframePlayer :key="activeEpisodeId" :source-url="activeEpisode.source_url" :source-name="movie.source" />
     </div>
 
     <!-- English sources: tabs for dual source -->
