@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Watchflix - Download</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d0d1a;
+      color: #e8e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .hero {
+      text-align: center;
+      padding: 80px 20px 40px;
+      max-width: 700px;
+    }
+    .hero h1 {
+      font-size: 48px;
+      font-weight: 800;
+      color: #77be41;
+      margin-bottom: 12px;
+    }
+    .hero p {
+      font-size: 18px;
+      color: #8888a0;
+      line-height: 1.6;
+    }
+    .downloads {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      max-width: 800px;
+      width: 100%;
+      padding: 0 20px;
+      margin-bottom: 60px;
+    }
+    .card {
+      background: #161628;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 28px 24px;
+      text-align: center;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .card:hover { border-color: #77be41; transform: translateY(-2px); }
+    .card .icon { font-size: 40px; margin-bottom: 12px; }
+    .card h3 { font-size: 18px; margin-bottom: 6px; }
+    .card .meta { font-size: 13px; color: #555570; margin-bottom: 16px; }
+    .card a {
+      display: inline-block;
+      padding: 10px 24px;
+      background: #77be41;
+      color: #111;
+      font-weight: 700;
+      font-size: 14px;
+      border-radius: 20px;
+      text-decoration: none;
+      transition: background 0.2s;
+    }
+    .card a:hover { background: #8fd455; }
+    .footer {
+      padding: 40px 20px;
+      text-align: center;
+      color: #555570;
+      font-size: 13px;
+    }
+    .footer a { color: #77be41; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    @media (max-width: 480px) {
+      .hero h1 { font-size: 32px; }
+      .hero p { font-size: 15px; }
+      .downloads { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Watchflix</h1>
+    <p>Stream movies and TV shows. Available for macOS, Windows, and Linux.</p>
+  </div>
+
+  <div class="downloads" id="downloads">
+    <div class="card">
+      <div class="icon">&#63743;</div>
+      <h3>macOS</h3>
+      <div class="meta">DMG &middot; Apple Silicon &amp; Intel</div>
+      <a href="https://github.com/stuk88/watchflix/releases/latest" id="dl-mac">Download</a>
+    </div>
+    <div class="card">
+      <div class="icon">&#8862;</div>
+      <h3>Windows</h3>
+      <div class="meta">Installer &middot; x64</div>
+      <a href="https://github.com/stuk88/watchflix/releases/latest" id="dl-win">Download</a>
+    </div>
+    <div class="card">
+      <div class="icon">&#9881;</div>
+      <h3>Linux</h3>
+      <div class="meta">AppImage &middot; deb &middot; tar.gz</div>
+      <a href="https://github.com/stuk88/watchflix/releases/latest" id="dl-linux">Download</a>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>
+      <a href="https://github.com/stuk88/watchflix">Source on GitHub</a>
+      &middot; Built with Electron &amp; Vue.js
+    </p>
+  </div>
+
+  <script>
+    // Try to resolve direct download links from the latest release
+    fetch('https://api.github.com/repos/stuk88/watchflix/releases/latest')
+      .then(r => r.json())
+      .then(release => {
+        if (!release.assets) return;
+        for (const a of release.assets) {
+          const n = a.name.toLowerCase();
+          if (n.includes('arm64') && n.endsWith('.dmg'))
+            document.getElementById('dl-mac').href = a.browser_download_url;
+          else if (n.endsWith('.exe'))
+            document.getElementById('dl-win').href = a.browser_download_url;
+          else if (n.endsWith('.appimage'))
+            document.getElementById('dl-linux').href = a.browser_download_url;
+        }
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

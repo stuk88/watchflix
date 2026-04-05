@@ -1,0 +1,137 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  # ── macOS (DMG arm64 + x64) ──────────────────────────────────────────
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build UI
+        run: npm run build -w ui
+
+      - name: Stage API bundle
+        run: bash scripts/prebuild-api.sh
+
+      - name: Build macOS packages
+        run: npm run build:mac -w desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-packages
+          path: |
+            desktop/dist/*.dmg
+          retention-days: 30
+
+  # ── Linux (AppImage + deb + tar.gz) ──────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build UI
+        run: npm run build -w ui
+
+      - name: Stage API bundle
+        run: bash scripts/prebuild-api.sh
+
+      - name: Build Linux packages
+        run: npm run build:linux -w desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+            desktop/dist/*.tar.gz
+          retention-days: 30
+
+  # ── Windows (NSIS installer) ─────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build UI
+        run: npm run build -w ui
+
+      - name: Stage API bundle
+        shell: bash
+        run: bash scripts/prebuild-api.sh
+
+      - name: Build Windows packages
+        run: npm run build:win -w desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-packages
+          path: |
+            desktop/dist/*.exe
+          retention-days: 30
+
+  # ── Create GitHub Release with all artifacts ─────────────────────────
+  release:
+    needs: [build-mac, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -20
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/mac-packages/*
+            artifacts/linux-packages/*
+            artifacts/win-packages/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

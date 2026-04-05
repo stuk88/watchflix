@@ -21,7 +21,10 @@ rm -rf "$BUNDLE_DIR"
 mkdir -p "$BUNDLE_DIR"
 
 # 2. Copy API source (exclude tests, env files, and node_modules)
-rsync -a --exclude='node_modules' --exclude='tests' --exclude='.env*' "$API_DIR/" "$BUNDLE_DIR/"
+#    Uses cp + rm instead of rsync for portability (Windows CI has no rsync)
+cp -r "$API_DIR/." "$BUNDLE_DIR/"
+rm -rf "$BUNDLE_DIR/node_modules" "$BUNDLE_DIR/tests"
+rm -f "$BUNDLE_DIR"/.env*
 
 # 3. Install production deps in isolation (outside the workspace tree)
 cp "$API_DIR/package.json" "$TEMP_DIR/"
