@@ -1,9 +1,9 @@
 <template>
   <div class="iframe-player">
     <div v-if="!started" class="player-start" @click="startPlayer">
-      <div class="start-icon">🌐</div>
-      <div class="start-text">Watch Online</div>
-      <div class="start-quality">123movies · HD</div>
+      <div class="start-icon">{{ icon }}</div>
+      <div class="start-text">{{ label }}</div>
+      <div class="start-quality">{{ qualityLabel }}</div>
     </div>
     <div v-else class="iframe-wrap">
       <iframe
@@ -19,14 +19,27 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 
-defineProps({
+const props = defineProps({
   sourceUrl: String,
+  sourceName: { type: String, default: '123movies' },
 });
 
 const started = ref(false);
 const iframeEl = ref(null);
+
+const sourceLabels = {
+  '123movies': { icon: '🌐', label: 'Watch Online', quality: '123movies · HD' },
+  hdrezka: { icon: '🎬', label: 'Hdrezka', quality: 'Hdrezka · HD' },
+  seazonvar: { icon: '📺', label: 'Seazonvar', quality: 'Seazonvar · HD' },
+  filmix: { icon: '🎥', label: 'Filmix', quality: 'Filmix · HD' },
+};
+
+const info = computed(() => sourceLabels[props.sourceName] || sourceLabels['123movies']);
+const icon = computed(() => info.value.icon);
+const label = computed(() => info.value.label);
+const qualityLabel = computed(() => info.value.quality);
 
 function startPlayer() {
   started.value = true;

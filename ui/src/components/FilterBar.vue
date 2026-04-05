@@ -1,6 +1,14 @@
 <template>
   <div class="filter-bar">
     <label>
+      Language
+      <select v-model="store.filters.language" @change="onLanguageChange">
+        <option value="all">All Languages</option>
+        <option value="en">English</option>
+        <option value="ru">Russian</option>
+      </select>
+    </label>
+    <label>
       Type
       <select v-model="store.filters.type" @change="apply">
         <option value="all">All Types</option>
@@ -35,8 +43,15 @@
       Source
       <select v-model="store.filters.source" @change="apply">
         <option value="all">All Sources</option>
-        <option value="123movies">123Movies</option>
-        <option value="torrent">Torrents</option>
+        <template v-if="store.filters.language === 'ru'">
+          <option value="hdrezka">Hdrezka</option>
+          <option value="seazonvar">Seazonvar</option>
+          <option value="filmix">Filmix</option>
+        </template>
+        <template v-else>
+          <option value="123movies">123Movies</option>
+          <option value="torrent">Torrents</option>
+        </template>
       </select>
     </label>
     <label>
@@ -57,6 +72,12 @@ const genres = [
   'Documentary', 'Drama', 'Family', 'Fantasy', 'History', 'Horror',
   'Music', 'Mystery', 'Romance', 'Sci-Fi', 'Sport', 'Thriller', 'War', 'Western'
 ];
+
+function onLanguageChange() {
+  // Reset source filter when language changes (sources differ per language)
+  store.filters.source = 'all';
+  apply();
+}
 
 function apply() {
   store.fetchMovies(1);

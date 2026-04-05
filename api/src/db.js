@@ -63,4 +63,13 @@ db.exec(`
   );
 `);
 
+// Migration: add language column
+try {
+  db.exec(`ALTER TABLE movies ADD COLUMN language TEXT DEFAULT 'en'`);
+} catch (e) {
+  // Column already exists
+}
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_language ON movies(language)`);
+
 export default db;

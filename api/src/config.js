@@ -17,6 +17,12 @@ export const proxyAllowedDomains = [
   'opensubtitles.com',
   'dl.opensubtitles.org',
   'vip.openbullet.dev',
+  // Russian streaming sources
+  'hdrezka.ag',
+  'rezka.ag',
+  'sezonvar.org',
+  'filmix.fm',
+  'filmix.ac',
 ];
 
 /** Returns true if the URL's hostname matches an allowed domain (including subdomains). */
@@ -41,6 +47,9 @@ export default {
   minImdbRating: 6.0,
   sources: {
     movies123: 'https://ww6.123movieshd.com',
-    ytsApi: 'https://yts.torrentbay.st/api/v2'
+    ytsApi: 'https://yts.torrentbay.st/api/v2',
+    hdrezka: 'https://hdrezka.ag',
+    seazonvar: 'https://sezonvar.org',
+    filmix: 'https://filmix.fm',
   }
 };

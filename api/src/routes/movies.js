@@ -31,6 +31,7 @@ router.get('/', (req, res) => {
     show_hidden,
     only_hidden,
     type = 'all',
+    language,
   } = req.query;
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -56,6 +57,10 @@ router.get('/', (req, res) => {
   if (search) {
     conditions.push("(title LIKE @search OR actors LIKE @search OR director LIKE @search)");
     params.search = `%${search}%`;
+  }
+  if (language && language !== 'all') {
+    conditions.push("COALESCE(language, 'en') = @language");
+    params.language = language;
   }
   if (favorites === '1') {
     conditions.push("is_favorite = 1");
