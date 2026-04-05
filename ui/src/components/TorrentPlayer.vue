@@ -11,10 +11,20 @@
           ref="videoEl"
           controls
           autoplay
+          crossorigin="anonymous"
           class="player-video"
           :src="streamUrl"
           @error="onVideoError"
-        ></video>
+        >
+          <track
+            v-if="activeTrackBlobUrl"
+            :src="activeTrackBlobUrl"
+            kind="subtitles"
+            :label="activeTrackLabel"
+            :srclang="activeTrackLang"
+            default
+          />
+        </video>
       </div>
       <!-- Playback controls -->
       <div class="playback-controls">
@@ -154,8 +164,11 @@ const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
 const playbackSpeed = ref(1);
+const activeTrackBlobUrl = ref(null);
+const activeTrackLabel = ref('Subtitles');
+const activeTrackLang = ref('en');
 let subtitleCues = [];
-let activeTrack = null;
+let rawVttText = '';
 
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -245,11 +258,41 @@ function parseVTTTime(str) {
 }
 
 function clearSubtitleTrack() {
-  if (activeTrack) {
-    activeTrack.mode = 'disabled';
-    activeTrack = null;
+  if (activeTrackBlobUrl.value) {
+    URL.revokeObjectURL(activeTrackBlobUrl.value);
+    activeTrackBlobUrl.value = null;
   }
   subtitleCues = [];
+  rawVttText = '';
+}
+
+function generateOffsetVTT(cues, offset) {
+  const lines = ['WEBVTT', ''];
+  for (const cue of cues) {
+    const start = Math.max(0, cue.start - offset);
+    const end = Math.max(0, cue.end - offset);
+    lines.push(`${formatVTTTime(start)} --> ${formatVTTTime(end)}`);
+    lines.push(cue.text);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+function formatVTTTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`;
+}
+
+function setBlobTrack(vttContent, label, lang) {
+  if (activeTrackBlobUrl.value) {
+    URL.revokeObjectURL(activeTrackBlobUrl.value);
+  }
+  const blob = new Blob([vttContent], { type: 'text/vtt' });
+  activeTrackBlobUrl.value = URL.createObjectURL(blob);
+  activeTrackLabel.value = label || 'Subtitles';
+  activeTrackLang.value = lang || 'en';
 }
 
 function dotSimilarity(a, b) {
@@ -303,14 +346,23 @@ async function selectSubtitleFile(file) {
 
   try {
     const response = await fetch(file.url);
-    const vttText = await response.text();
-    subtitleCues = parseVTT(vttText);
-    const track = videoEl.value.addTextTrack('subtitles', 'English', 'en');
-    track.mode = 'showing';
-    for (const cue of subtitleCues) {
-      track.addCue(new VTTCue(cue.start - subOffset.value, cue.end - subOffset.value, cue.text));
+    rawVttText = await response.text();
+    subtitleCues = parseVTT(rawVttText);
+
+    const trackInfo = subtitleTracks.value.find(t => t.language === currentSubtitle.value);
+    const label = trackInfo?.label || 'Subtitles';
+    const lang = trackInfo?.language === '_torrent' ? 'en' : (trackInfo?.language || 'en');
+
+    setBlobTrack(generateOffsetVTT(subtitleCues, 0), label, lang);
+
+    // Ensure track is showing after Vue re-renders the <track> element
+    await new Promise(r => setTimeout(r, 100));
+    const video = videoEl.value;
+    if (video?.textTracks?.length) {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        video.textTracks[i].mode = 'showing';
+      }
     }
-    activeTrack = track;
   } catch (err) {
     console.error('[subtitles] Failed to load VTT:', err);
   }
@@ -329,13 +381,20 @@ function setSpeed(s) {
   if (videoEl.value) videoEl.value.playbackRate = s;
 }
 
-watch(subOffset, () => {
-  if (activeTrack && subtitleCues.length) {
-    while (activeTrack.cues.length) {
-      activeTrack.removeCue(activeTrack.cues[0]);
-    }
-    for (const cue of subtitleCues) {
-      activeTrack.addCue(new VTTCue(cue.start - subOffset.value, cue.end - subOffset.value, cue.text));
+watch(subOffset, async () => {
+  if (subtitleCues.length && activeSubUrl.value) {
+    const trackInfo = subtitleTracks.value.find(t => t.language === currentSubtitle.value);
+    const label = trackInfo?.label || 'Subtitles';
+    const lang = trackInfo?.language === '_torrent' ? 'en' : (trackInfo?.language || 'en');
+
+    setBlobTrack(generateOffsetVTT(subtitleCues, subOffset.value), label, lang);
+
+    await new Promise(r => setTimeout(r, 100));
+    const video = videoEl.value;
+    if (video?.textTracks?.length) {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        video.textTracks[i].mode = 'showing';
+      }
     }
   }
 });
@@ -449,9 +508,13 @@ async function removeMovie() {
 }
 
 onUnmounted(() => {
-  clearSubtitleTrack();
+  if (activeTrackBlobUrl.value) URL.revokeObjectURL(activeTrackBlobUrl.value);
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
+  // Destroy torrent and delete cached files immediately
+  if (activeMovieId.value) {
+    axios.delete(`/api/movies/${activeMovieId.value}/stream`).catch(() => {});
+  }
 });
 </script>
 
