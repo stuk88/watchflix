@@ -7,6 +7,10 @@ const BROWSER_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chro
 const cache = new Map();
 const CACHE_TTL = 25 * 60 * 1000; // 25 min (HLS tokens expire)
 
+// Embed URL cache: movieId:server -> { embedUrl, expiry }
+const embedCache = new Map();
+const EMBED_CACHE_TTL = 20 * 60 * 1000; // 20 min
+
 /**
  * Extract HLS stream URL by loading the 123movies source page directly.
  *
@@ -154,6 +158,96 @@ export async function extractStreamUrl(movieId, server = 2) {
 
     const result = { m3u8: m3u8Url, subtitles: subtitleUrl, tmdbId: movie.tmdb_id ?? null, expiry: Date.now() + CACHE_TTL };
     cache.set(cacheKey, result);
+    return result;
+  } catch (err) {
+    if (browser) await browser.close().catch(() => {});
+    throw err;
+  }
+}
+
+/**
+ * Extract the embed iframe URL from the 123movies page.
+ * Navigates to the 123movies page, clicks play, and intercepts the final
+ * player URL (vsembed.ru / vidnest.fun / etc.) from the embed chain.
+ *
+ * Chain: 123movies → netoda.tech → embos.net → vsembed.ru (actual player)
+ * All frames load in the same browser context so one request listener catches all.
+ */
+export async function extractEmbedUrl(movieId, server = 2) {
+  const cacheKey = `${movieId}:${server}`;
+  const cached = embedCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) return cached;
+
+  const movie = db.prepare('SELECT source_url, title, type, season, episode FROM movies WHERE id = ?').get(movieId);
+  if (!movie) throw new Error('Movie not found');
+  if (!movie.source_url) throw new Error(`No source URL stored for "${movie.title}"`);
+
+  const isTvShow = movie.type === 'series';
+  console.log(`[embed-extractor] Extracting player for "${movie.title}" server=${server}`);
+
+  // Known final player domains
+  const PLAYER_DOMAINS = [
+    'vsembed.ru', 'vidnest.fun', 'vidsrc.cc', 'vidlink.pro', 'vidfast.pro',
+    'videasy.net', 'vidzee.wtf', 'mcloud.bz', 'rabbitstream.net',
+    'megacloud.tv', 'rapid-cloud.co', 'dokicloud.one',
+  ];
+
+  let browser;
+  try {
+    browser = await chromium.launch({
+      executablePath: BROWSER_PATH,
+      headless: true,
+      args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-features=IsolateOrigins,site-per-process'],
+    });
+
+    const ctx = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      ignoreHTTPSErrors: true,
+    });
+
+    const page = await ctx.newPage();
+    let embedUrl = null;
+
+    // Listen on ALL requests across ALL frames in this context
+    // The full chain (123movies → netoda.tech → embos.net → vsembed.ru) fires in one context
+    ctx.on('request', req => {
+      if (embedUrl) return;
+      const url = req.url();
+      if (PLAYER_DOMAINS.some(d => url.includes(d)) &&
+          (url.includes('/embed/') || url.includes('/movie/') || url.includes('/watch') || url.includes('mid='))) {
+        embedUrl = url;
+        console.log(`[embed-extractor] ✅ Player URL: ${url.substring(0, 120)}`);
+      }
+    });
+
+    await page.goto(movie.source_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(1000);
+
+    if (server !== 2) {
+      await page.click(`#srv-${server}`, { timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(300);
+    }
+
+    await page.click('#play-now', { timeout: 5000 }).catch(e => {
+      throw new Error(`Play button not found: ${e.message}`);
+    });
+
+    if (isTvShow && movie.episode && movie.episode > 1) {
+      await page.waitForTimeout(800);
+      await page.click(`#ep-${movie.episode}`, { timeout: 3000 }).catch(() => {});
+    }
+
+    // Wait up to 20s for the final player URL to appear
+    for (let i = 0; i < 20 && !embedUrl; i++) {
+      await page.waitForTimeout(1000);
+    }
+
+    await browser.close();
+
+    if (!embedUrl) throw new Error(`Could not extract player URL for "${movie.title}" (server ${server})`);
+
+    const result = { embedUrl, server, expiry: Date.now() + EMBED_CACHE_TTL };
+    embedCache.set(cacheKey, result);
     return result;
   } catch (err) {
     if (browser) await browser.close().catch(() => {});

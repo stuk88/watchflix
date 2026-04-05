@@ -1,34 +1,34 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Real end-to-end test for 123movies stream extraction.
+ * Real end-to-end test for 123movies embed extraction.
  *
  * Verifies the full pipeline without mocks:
  *   1. API returns 123movies-sourced movies with valid source_url
- *   2. /123stream launches a headless browser, loads the 123movies film page,
- *      clicks play, and intercepts the HLS m3u8 URL from the embed chain
- *   3. The returned proxy URL routes through /123proxy
- *   4. /123proxy fetches the HLS playlist and returns valid #EXTM3U content
+ *   2. /123embed launches a headless browser, loads the 123movies film page,
+ *      clicks play, and intercepts the player embed URL from the embed chain
+ *   3. The returned embed URL points to a known player domain and is reachable
  *
  * The extraction step (~15–35s) requires dev servers running:
  *   npm run dev   (API: :3001, UI: :5173)
  *
  * NOTE: Uses 127.0.0.1 — Playwright resolves "localhost" to IPv6 ::1 on macOS.
- * NOTE: The 123movies embed chain generates IP-bound tokens. Since Playwright and
- *       the API server both run on the same machine, the IP is consistent.
  */
 
 const API = 'http://127.0.0.1:3001/api';
 
-test.describe.serial('123movies real stream extraction', () => {
+const PLAYER_DOMAINS = [
+  'vsembed.ru', 'vidnest.fun', 'vidsrc.cc', 'vidlink.pro', 'vidfast.pro',
+  'videasy.net', 'vidzee.wtf', 'mcloud.bz', 'rabbitstream.net',
+  'megacloud.tv', 'rapid-cloud.co', 'dokicloud.one',
+];
 
-  /** The movie used for this test run — chosen from the live DB. */
+test.describe.serial('123movies real embed extraction', () => {
+
   let testMovie;
-  /** The proxy URL returned by /123stream */
-  let proxyUrl;
+  let embedUrl;
 
   test.beforeAll(async ({ request }) => {
-    // Pick a non-series 123movies movie that has a source_url (required for extraction)
     const res = await request.get(`${API}/movies?limit=100&source=123movies&type=movie`);
     expect(res.ok(), 'GET /api/movies should return 200').toBeTruthy();
 
@@ -41,11 +41,8 @@ test.describe.serial('123movies real stream extraction', () => {
     );
 
     expect(movies.length, 'Need at least one 123movies non-series movie with source_url').toBeGreaterThan(0);
-
-    // Prefer movies with tmdb_id already cached (extraction is faster) and high rating
-    testMovie = movies.find(m => m.tmdb_id) ?? movies[0];
-
-    console.log(`[beforeAll] Test movie: "${testMovie.title}" (id=${testMovie.id}, source=${testMovie.source}, tmdb_id=${testMovie.tmdb_id ?? 'none'})`);
+    testMovie = movies[0];
+    console.log(`[beforeAll] Test movie: "${testMovie.title}" (id=${testMovie.id})`);
   });
 
   test('1. movie has valid source_url pointing to 123movieshd.com', async () => {
@@ -55,75 +52,51 @@ test.describe.serial('123movies real stream extraction', () => {
     console.log(`[test 1] source_url: ${testMovie.source_url}`);
   });
 
-  test('2. /123stream extracts real HLS m3u8 URL', async ({ request }) => {
-    // Extraction launches headless Chrome to load 123movies page, click play,
-    // and intercept the m3u8 from the embed chain (netoda.tech → embed provider).
-    // Allow up to 90s for the full Playwright extraction cycle.
+  test('2. /123embed extracts real player embed URL', async ({ request }) => {
     test.setTimeout(90000);
 
-    const res = await request.get(`${API}/movies/${testMovie.id}/123stream`);
-
-    console.log(`[test 2] /123stream status: ${res.status()}`);
-
-    expect(res.ok(), `/123stream must return 200 (got ${res.status()})`).toBeTruthy();
+    const res = await request.get(`${API}/movies/${testMovie.id}/123embed?server=2`, { timeout: 80000 });
+    console.log(`[test 2] /123embed status: ${res.status()}`);
+    expect(res.ok(), `/123embed must return 200 (got ${res.status()})`).toBeTruthy();
 
     const data = await res.json();
     console.log('[test 2] Response:', JSON.stringify(data).substring(0, 300));
 
-    // Validate response shape
-    expect(data.m3u8, 'Response must include m3u8 field').toBeTruthy();
-    expect(data.m3u8, 'm3u8 must route through /123proxy').toContain(`/api/movies/${testMovie.id}/123proxy`);
-    expect(data.m3u8, 'm3u8 must include url= query param').toContain('url=');
+    expect(data.embedUrl, 'Response must include embedUrl field').toBeTruthy();
+    expect(() => new URL(data.embedUrl), 'embedUrl must be a valid URL').not.toThrow();
 
-    // The proxied URL must be an actual HLS resource, not a tracking/analytics URL
-    const innerUrl = decodeURIComponent(data.m3u8.split('url=')[1] ?? '');
-    const innerPath = (() => { try { return new URL(innerUrl).pathname; } catch { return innerUrl; } })();
-    expect(
-      innerPath.includes('.m3u8') || innerPath.includes('/hls/'),
-      `Inner URL must be an HLS resource (got path: "${innerPath.substring(0, 80)}")`
-    ).toBeTruthy();
+    const matchesPlayer = PLAYER_DOMAINS.some(d => data.embedUrl.includes(d));
+    expect(matchesPlayer, `embedUrl must point to a known player domain (got: ${data.embedUrl.substring(0, 80)})`).toBeTruthy();
 
-    // Servers array must list available servers
     expect(Array.isArray(data.servers), 'servers must be an array').toBeTruthy();
     expect(data.servers.length, 'servers must have at least 2 entries').toBeGreaterThanOrEqual(2);
 
-    proxyUrl = data.m3u8;
-    console.log(`[test 2] ✅ Proxy URL: ${proxyUrl.substring(0, 120)}`);
+    embedUrl = data.embedUrl;
+    console.log(`[test 2] ✅ Embed URL: ${embedUrl.substring(0, 120)}`);
   });
 
-  test('3. /123proxy returns a valid HLS playlist', async ({ request }) => {
-    // The proxy fetches the CDN m3u8 and rewrites segment URLs.
-    // CDN tokens are time-bound so this must run immediately after test 2.
+  test('3. embed URL is reachable and serves a player page', async ({ request }) => {
     test.setTimeout(30000);
+    expect(embedUrl, 'embedUrl must be set from test 2').toBeTruthy();
 
-    expect(proxyUrl, 'proxyUrl must be set from test 2').toBeTruthy();
-
-    const playlistRes = await request.get(`http://127.0.0.1:3001${proxyUrl}`);
-    console.log(`[test 3] Proxy status: ${playlistRes.status()}`);
-
-    if (!playlistRes.ok()) {
-      // CDN token may have already expired; log and skip content checks rather than fail
-      console.warn(`[test 3] Proxy returned ${playlistRes.status()} — CDN token may have expired, skipping playlist content check`);
-      return;
+    let status;
+    try {
+      const res = await request.fetch(embedUrl, {
+        method: 'GET',
+        timeout: 15000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+          'Referer': 'https://ww6.123movieshd.com/',
+        },
+        ignoreHTTPSErrors: true,
+      });
+      status = res.status();
+    } catch {
+      status = 0;
     }
 
-    const playlist = await playlistRes.text();
-    console.log('[test 3] Playlist preview:', playlist.substring(0, 400));
-
-    // Must be a valid HLS playlist
-    expect(playlist, 'Playlist must start with HLS #EXTM3U header').toContain('#EXTM3U');
-
-    // Segment or sub-playlist lines must be rewritten through our proxy
-    const nonCommentLines = playlist.split('\n').filter(l => l.trim() && !l.startsWith('#'));
-    if (nonCommentLines.length > 0) {
-      const firstLine = nonCommentLines[0];
-      expect(firstLine, 'Segment/playlist URLs must be rewritten through /123proxy').toContain(
-        `/api/movies/${testMovie.id}/123proxy?url=`
-      );
-      console.log(`[test 3] ✅ Playlist has ${nonCommentLines.length} rewritten URL(s)`);
-    } else {
-      // Empty non-comment lines is acceptable for some master playlists
-      console.log('[test 3] Playlist has no non-comment lines (may be a meta-only master playlist)');
-    }
+    console.log(`[test 3] Embed URL HTTP status: ${status}`);
+    expect(status >= 200 && status < 500, `Embed URL must be reachable (got ${status})`).toBeTruthy();
+    console.log('[test 3] ✅ Embed URL is reachable');
   });
 });

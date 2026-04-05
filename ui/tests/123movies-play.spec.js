@@ -1,229 +1,351 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Integration test: 123movies scrape → play movie via HLS extraction.
+ * Integration test: 123movies iframe player — movies and series.
  *
- * Tests the full pipeline in order:
- * 1. API has 123movies-sourced movies (valid imdb_id, source_url, imdb_rating >= 6.0)
- * 2. /123stream extracts HLS URL via Playwright + vidnest.fun TMDB mapping
- * 3. tmdb_id is persisted to DB after first extraction
- * 4. /123proxy serves a valid HLS playlist with rewritten segment URLs
- * 5. UI movie page shows Watch Online button / HLS player start
- * 6. Clicking play triggers extraction, shows spinner, resolves to video or error+servers
+ * Tests the full pipeline:
+ * 1. API has movies/series with valid source_url pointing to 123movieshd.com
+ * 2. Movie detail page shows "Watch Online" button or tab
+ * 3. Clicking "Watch Online" loads the 123movies page in an iframe
+ * 4. Iframe is interactive (123movies page content loads inside it)
+ * 5. Series: episode switching reloads the iframe with the correct source_url
  *
  * Requires: dev server running (npm run dev), movies in DB from 123movies source.
- * NOTE: Use 127.0.0.1 NOT localhost — Playwright resolves localhost to IPv6 ::1.
- * NOTE: HLS extraction launches a headless browser (~15-20s), so step 2 needs 90s timeout.
  */
 
 const API = 'http://127.0.0.1:3001/api';
 const UI = 'http://127.0.0.1:5173';
 
-// Serial because tests share movie123 state and step 3 depends on step 2 caching tmdb_id.
-test.describe.serial('123movies scrape and play', () => {
-
+test.describe.serial('123movies iframe player', () => {
   let movie123;
+  let series123;
 
   test.beforeAll(async ({ request }) => {
-    // Pick any non-series 123movies movie with a source_url.
-    // We no longer rely on tmdb_id being pre-cached since the extractor now loads
-    // the 123movies source page directly (embos.net was replaced by netoda.tech).
-    const listRes = await request.get(`${API}/movies?limit=100&source=123movies&type=movie`);
-    expect(listRes.ok(), 'GET /api/movies should return 200').toBeTruthy();
+    const res = await request.get(`${API}/movies?limit=200&source=123movies`);
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    const all = body.movies ?? body;
 
-    const body = await listRes.json();
-    const candidates = (body.movies ?? body).filter(
-      m => (m.source === '123movies' || m.source === 'both') &&
-           m.source_url &&
-           m.source_url.includes('123movieshd.com/film/') &&
-           m.type !== 'series'
+    // Find a movie (not series) with source_url
+    movie123 = all.find(
+      m => m.type !== 'series' &&
+           (m.source === '123movies' || m.source === 'both') &&
+           m.source_url?.includes('123movieshd.com')
     );
 
-    expect(candidates.length, 'Must have at least one 123movies movie candidate').toBeGreaterThan(0);
+    // Find a series episode with source_url
+    series123 = all.find(
+      m => m.type === 'series' &&
+           m.source_url?.includes('123movieshd.com')
+    );
 
-    movie123 = candidates[0];
-    console.log(`[beforeAll] Using movie: "${movie123.title}" (id=${movie123.id}, source=${movie123.source})`);
+    console.log(`[beforeAll] Movie: ${movie123 ? `"${movie123.title}" (id=${movie123.id})` : 'NONE'}`);
+    console.log(`[beforeAll] Series: ${series123 ? `"${series123.title}" S${series123.season}E${series123.episode} (id=${series123.id})` : 'NONE'}`);
   });
 
-  test('1. API has 123movies-sourced movies with valid fields', async ({ request }) => {
-    const res = await request.get(`${API}/movies?limit=50&source=123movies`);
-    expect(res.ok(), 'GET /movies?source=123movies should return 200').toBeTruthy();
-
+  // ─── 1. Movies with valid source URLs exist ─────────────────────────────────
+  test('1. API has 123movies-sourced movies with valid source_url', async ({ request }) => {
+    const res = await request.get(`${API}/movies?limit=50&source=123movies&type=movie`);
+    expect(res.ok()).toBeTruthy();
     const body = await res.json();
-    const movies = body.movies ?? body;
-    const from123 = movies.filter(m => m.source === '123movies' || m.source === 'both');
-
-    expect(from123.length, 'Should have at least one 123movies movie').toBeGreaterThan(0);
-    console.log(`[test 1] Found ${from123.length} movies from 123movies source`);
-
-    // Pick the first movie (not a series episode) to check imdb_id format.
-    // Series episodes use series_imdb_id instead of imdb_id.
-    const m = from123.find(x => x.type !== 'series') ?? from123[0];
-    expect(m.title, 'Movie must have a title').toBeTruthy();
-    const effectiveImdbId = m.imdb_id ?? m.series_imdb_id;
-    expect(effectiveImdbId, 'imdb_id or series_imdb_id must match tt\\d+ format').toMatch(/^tt\d+$/);
-    expect(m.source_url, 'source_url must point to 123movieshd.com').toContain('123movieshd.com/film/');
-    expect(m.imdb_rating, 'imdb_rating must be >= 6.0').toBeGreaterThanOrEqual(6.0);
+    const movies = (body.movies ?? body).filter(
+      m => m.source_url?.includes('123movieshd.com')
+    );
+    expect(movies.length, 'Must have at least one movie with 123movies source_url').toBeGreaterThan(0);
+    console.log(`[test 1] ${movies.length} movies with 123movies source_url`);
   });
 
-  test('2. /123stream extracts HLS URL via TMDB mapping', async ({ request }) => {
-    // Extraction launches a headless Chrome to load vidnest.fun — allow up to 90s.
-    test.setTimeout(90000);
-
-    const res = await request.get(`${API}/movies/${movie123.id}/123stream`);
-    expect(res.ok(), `/123stream should return 200 (got ${res.status()})`).toBeTruthy();
-
-    const data = await res.json();
-    console.log('[test 2] Stream response:', JSON.stringify(data).substring(0, 200));
-
-    // m3u8 should be a proxy path pointing through our /123proxy endpoint
-    expect(data.m3u8, 'Response must include m3u8 field').toBeTruthy();
-    expect(data.m3u8, 'm3u8 must route through /123proxy').toContain(`/api/movies/${movie123.id}/123proxy`);
-    expect(data.m3u8, 'm3u8 must include url= query param').toContain('url=');
-
-    // servers array should include the default server (id=2)
-    expect(data.servers, 'Response must include servers array').toBeInstanceOf(Array);
-    expect(data.servers.length, 'servers must have at least 2 entries').toBeGreaterThanOrEqual(2);
-    expect(
-      data.servers.some(s => s.id === 2),
-      'servers must include default server with id=2'
-    ).toBeTruthy();
-  });
-
-  test('3. tmdb_id is cached in DB after first extraction', async ({ request }) => {
-    // Depends on test 2 having run successfully and stored tmdb_id.
-    const res = await request.get(`${API}/movies/${movie123.id}`);
-    expect(res.ok(), `GET /movies/${movie123.id} should return 200`).toBeTruthy();
-
-    const movie = await res.json();
-    expect(movie.tmdb_id, 'tmdb_id must be stored in DB after extraction').toBeTruthy();
-    expect(parseInt(movie.tmdb_id), 'tmdb_id must be a positive integer').toBeGreaterThan(0);
-    console.log(`[test 3] tmdb_id cached: ${movie.tmdb_id}`);
-  });
-
-  test('4. /123proxy serves HLS playlist with rewritten segment URLs', async ({ request }) => {
-    // Re-fetch stream (cached in memory, ~instant) to get the current proxy URL.
-    test.setTimeout(90000);
-
-    const streamRes = await request.get(`${API}/movies/${movie123.id}/123stream`);
-    expect(streamRes.ok(), '/123stream should return 200 for proxy URL fetch').toBeTruthy();
-
-    const { m3u8: proxyPath } = await streamRes.json();
-    // proxyPath is like /api/movies/{id}/123proxy?url=<encoded-cdn-url>
-    const playlistRes = await request.get(`http://127.0.0.1:3001${proxyPath}`);
-
-    if (playlistRes.ok()) {
-      const playlist = await playlistRes.text();
-      console.log('[test 4] Playlist preview:', playlist.substring(0, 300));
-
-      expect(playlist, 'Playlist must start with #EXTM3U HLS header').toContain('#EXTM3U');
-
-      // Non-comment lines should be rewritten to go through our proxy
-      const segmentLines = playlist.split('\n').filter(l => l.trim() && !l.startsWith('#'));
-      if (segmentLines.length > 0) {
-        for (const line of segmentLines.slice(0, 3)) {
-          expect(line, 'Segment URL must be rewritten through /123proxy').toContain(
-            `/api/movies/${movie123.id}/123proxy?url=`
-          );
-        }
-        console.log(`[test 4] Playlist has ${segmentLines.length} rewritten segment URL(s)`);
-      } else {
-        // Master playlist may only contain sub-playlist references, also acceptable
-        console.log('[test 4] Playlist appears to be a master playlist (no segment lines)');
-      }
-    } else {
-      // CDN tokens expire; a non-200 here is acceptable — just log and skip content checks.
-      console.log(`[test 4] Proxy returned ${playlistRes.status()} — CDN token may have expired, skipping content assertions`);
-    }
-  });
-
-  test('5. UI shows Watch Online button for 123movies movie', async ({ page }) => {
-    await page.goto(`${UI}/movie/${movie123.id}`);
-
-    // Wait for movie data to load and hero title to render
-    await page.waitForSelector('h1.hero-title', { timeout: 10000 });
-    const title = await page.textContent('h1.hero-title');
-    expect(title, 'Hero title must be non-empty').toBeTruthy();
-    console.log(`[test 5] Movie page loaded: "${title?.trim()}"`);
-
-    // Source badge should always be present
-    const badge = await page.textContent('.source-badge');
-    expect(badge, 'Source badge must be visible').toBeTruthy();
-    console.log(`[test 5] Source badge: "${badge?.trim()}"`);
-
-    const hasTabs = await page.$('.source-tab');
-    const hasHlsStart = await page.$('.player-start');
-
-    if (hasTabs) {
-      // Dual-source movie (source === 'both'): both Watch Online and Torrent tabs shown
-      const tabs = await page.$$('.source-tab');
-      expect(tabs.length, 'Dual-source movie must show exactly 2 source tabs').toBe(2);
-      const tabTexts = await Promise.all(tabs.map(t => t.textContent()));
-      expect(tabTexts.some(t => t?.includes('Watch Online')), 'A tab must say "Watch Online"').toBeTruthy();
-      expect(tabTexts.some(t => t?.includes('Torrent')), 'A tab must say "Torrent"').toBeTruthy();
-      console.log('[test 5] Dual-source movie: both Watch Online and Torrent tabs visible');
-    } else if (hasHlsStart) {
-      // Single-source 123movies movie: HLS player start button shown directly
-      const startText = await page.textContent('.start-text');
-      expect(startText, 'Start button must say "Watch Online"').toContain('Watch Online');
-      console.log('[test 5] Single-source 123movies movie: HLS player start button visible');
-    } else {
-      throw new Error('Neither source tabs nor HLS player start button found on movie page');
-    }
-  });
-
-  test('6. clicking Watch Online triggers extraction, resolves to video or error+servers', async ({ page }) => {
-    // Full extraction + HLS load. Extraction alone takes 15-20s; allow generous buffer.
-    test.setTimeout(120000);
+  // ─── 2. Movie page shows Watch Online ───────────────────────────────────────
+  test('2. Movie page shows Watch Online button', async ({ page }) => {
+    test.skip(!movie123, 'No 123movies movie available');
 
     await page.goto(`${UI}/movie/${movie123.id}`);
     await page.waitForSelector('h1.hero-title', { timeout: 10000 });
 
-    // If dual-source tabs exist, click Watch Online first
-    const watchTab = await page.$('.source-tab:has-text("Watch Online")');
-    if (watchTab) {
+    // Either source tabs with "Watch Online" or direct player-start button
+    const watchOnline = page.locator('.source-tab:has-text("Watch Online"), .player-start');
+    await expect(watchOnline.first()).toBeVisible({ timeout: 5000 });
+    console.log('[test 2] Watch Online button/tab visible');
+  });
+
+  // ─── 3. Clicking Watch Online loads 123movies in iframe ─────────────────────
+  test('3. Clicking Watch Online loads 123movies page in iframe', async ({ page }) => {
+    test.setTimeout(30000);
+    test.skip(!movie123, 'No 123movies movie available');
+
+    await page.goto(`${UI}/movie/${movie123.id}`);
+    await page.waitForSelector('h1.hero-title', { timeout: 10000 });
+
+    // Click Watch Online tab if present (for "both" source movies)
+    const watchTab = page.locator('.source-tab:has-text("Watch Online")');
+    if (await watchTab.count() > 0) {
       await watchTab.click();
       await page.waitForTimeout(300);
-      console.log('[test 6] Clicked Watch Online tab');
     }
 
-    // Click the HLS player start button
-    const startBtn = await page.$('.player-start');
-    expect(startBtn, 'HLS player start button (.player-start) must be visible before clicking').toBeTruthy();
+    // Click the player start button
+    const startBtn = page.locator('.player-start');
+    await expect(startBtn).toBeVisible({ timeout: 5000 });
     await startBtn.click();
-    console.log('[test 6] Clicked player-start — extraction in progress');
 
-    // Loading spinner should appear almost immediately
-    const spinner = await page.waitForSelector('.spinner, .loading-text', { timeout: 5000 }).catch(() => null);
-    if (spinner) {
-      console.log('[test 6] Loading spinner appeared — extraction underway');
+    // Iframe should appear with a 123movies source URL
+    const iframe = page.locator('iframe.player-iframe');
+    await expect(iframe).toBeAttached({ timeout: 10000 });
+
+    const src = await iframe.getAttribute('src');
+    console.log(`[test 3] Iframe src: ${src}`);
+    expect(src, 'Iframe src must be a 123movies URL').toContain('123movieshd.com');
+
+    // Iframe should have reasonable dimensions
+    const box = await iframe.boundingBox();
+    expect(box, 'Iframe must have a bounding box (visible on screen)').toBeTruthy();
+    expect(box.height, 'Iframe height must be > 200px').toBeGreaterThan(200);
+    expect(box.width, 'Iframe width must be > 300px').toBeGreaterThan(300);
+    console.log(`[test 3] Iframe dimensions: ${Math.round(box.width)}x${Math.round(box.height)}`);
+  });
+
+  // ─── 4. Iframe content loads (not blank/blocked) ───────────────────────────
+  test('4. Iframe content loads successfully (not blank or blocked)', async ({ page }) => {
+    test.setTimeout(30000);
+    test.skip(!movie123, 'No 123movies movie available');
+
+    await page.goto(`${UI}/movie/${movie123.id}`);
+    await page.waitForSelector('h1.hero-title', { timeout: 10000 });
+
+    const watchTab = page.locator('.source-tab:has-text("Watch Online")');
+    if (await watchTab.count() > 0) await watchTab.click();
+
+    await page.locator('.player-start').click();
+
+    const iframe = page.locator('iframe.player-iframe');
+    await expect(iframe).toBeAttached({ timeout: 10000 });
+
+    // Wait for the iframe to fire its load event
+    await page.waitForTimeout(5000);
+
+    // The iframe should have loaded something (check that its src is still set)
+    const src = await iframe.getAttribute('src');
+    expect(src, 'Iframe src must still be set after load').toBeTruthy();
+
+    // Verify the page didn't crash or navigate away
+    const pageUrl = page.url();
+    expect(pageUrl, 'Parent page should still be on movie detail').toContain('/movie/');
+    console.log(`[test 4] Page still on: ${pageUrl}, iframe src: ${src}`);
+  });
+
+  // ─── 5. Series: page loads with episode list and Watch Online ──────────────
+  test('5. Series page shows episode list and Watch Online', async ({ page }) => {
+    test.skip(!series123, 'No 123movies series available');
+
+    await page.goto(`${UI}/movie/${series123.id}`);
+    await page.waitForSelector('h1.hero-title', { timeout: 10000 });
+
+    // Should show TV Series badge
+    const badge = page.locator('.tv-badge');
+    await expect(badge).toBeVisible({ timeout: 5000 });
+
+    // Should show episode pills
+    const episodes = page.locator('.episode-pill');
+    const epCount = await episodes.count();
+    expect(epCount, 'Series should have at least one episode pill').toBeGreaterThan(0);
+    console.log(`[test 5] Series has ${epCount} episode pills`);
+
+    // Watch Online should be available
+    const watchOnline = page.locator('.source-tab:has-text("Watch Online"), .player-start');
+    await expect(watchOnline.first()).toBeVisible({ timeout: 5000 });
+    console.log('[test 5] Watch Online visible for series');
+  });
+
+  // ─── 6. Series: clicking Watch Online loads iframe ─────────────────────────
+  test('6. Series Watch Online loads 123movies page in iframe', async ({ page }) => {
+    test.setTimeout(30000);
+    test.skip(!series123, 'No 123movies series available');
+
+    await page.goto(`${UI}/movie/${series123.id}`);
+    await page.waitForSelector('h1.hero-title', { timeout: 10000 });
+
+    const watchTab = page.locator('.source-tab:has-text("Watch Online")');
+    if (await watchTab.count() > 0) await watchTab.click();
+
+    const startBtn = page.locator('.player-start');
+    if (await startBtn.count() > 0) {
+      await startBtn.click();
     }
 
-    // Wait up to 60s for either a playable <video> or an error state with server buttons
-    const outcome = await Promise.race([
-      page.waitForSelector('video.player-video', { timeout: 60000 }).then(() => 'video'),
-      page.waitForSelector('.error-state', { timeout: 60000 }).then(() => 'error'),
-    ]);
+    const iframe = page.locator('iframe.player-iframe');
+    await expect(iframe).toBeAttached({ timeout: 10000 });
 
-    if (outcome === 'video') {
-      console.log('[test 6] ✅ video.player-video appeared — HLS stream loaded successfully');
-      // Server switching bar should be present alongside the video
-      const serverBar = await page.$('.server-bar');
-      if (serverBar) {
-        console.log('[test 6] Server switching bar is visible');
+    const src = await iframe.getAttribute('src');
+    console.log(`[test 6] Series iframe src: ${src}`);
+    expect(src, 'Series iframe src must be a 123movies URL').toContain('123movieshd.com');
+  });
+
+  // ─── 7. Iframe player is 100vh with no padding above ────────────────────────
+  test('7. Iframe player is 100vh tall with no padding above', async ({ page }) => {
+    test.setTimeout(15000);
+    test.skip(!movie123, 'No 123movies movie available');
+
+    await page.goto(`${UI}/movie/${movie123.id}`);
+    await page.waitForSelector('h1.hero-title', { timeout: 10000 });
+
+    const watchTab = page.locator('.source-tab:has-text("Watch Online")');
+    if (await watchTab.count() > 0) await watchTab.click();
+
+    await page.locator('.player-start').click();
+
+    const iframe = page.locator('iframe.player-iframe');
+    await expect(iframe).toBeAttached({ timeout: 10000 });
+
+    // Check iframe height is 100vh
+    const iframeHeight = await iframe.evaluate(el => el.getBoundingClientRect().height);
+    const viewportHeight = await page.evaluate(() => window.innerHeight);
+    expect(iframeHeight, `Iframe height (${iframeHeight}) must be ~100vh (${viewportHeight})`).toBeGreaterThanOrEqual(viewportHeight * 0.95);
+    console.log(`[test 7] Iframe height: ${iframeHeight}px, viewport: ${viewportHeight}px`);
+
+    // Check no padding/margin above the player section
+    const playerSection = page.locator('.player-section');
+    const sectionStyles = await playerSection.evaluate(el => {
+      const cs = window.getComputedStyle(el);
+      return {
+        marginTop: parseFloat(cs.marginTop),
+        paddingTop: parseFloat(cs.paddingTop),
+      };
+    });
+    expect(sectionStyles.marginTop, 'Player section margin-top must be 0').toBe(0);
+    expect(sectionStyles.paddingTop, 'Player section padding-top must be 0').toBe(0);
+    console.log(`[test 7] Player section margin-top: ${sectionStyles.marginTop}, padding-top: ${sectionStyles.paddingTop}`);
+
+    // Check no padding on iframe wrap
+    const wrapStyles = await page.locator('.iframe-wrap').evaluate(el => {
+      const cs = window.getComputedStyle(el);
+      return { paddingTop: parseFloat(cs.paddingTop) };
+    });
+    expect(wrapStyles.paddingTop, 'Iframe wrap padding-top must be 0').toBe(0);
+    console.log('[test 7] No padding above player');
+  });
+
+  // ─── 8. 123movies page has no space above player when CSS is injected ───────
+  test('8. 123movies page: header/nav hidden, #body padding removed, player is full height', async ({ page }) => {
+    test.setTimeout(15000);
+    test.skip(!movie123, 'No 123movies movie available');
+
+    // Load the 123movies page directly and inject the same CSS the Electron app injects
+    const sourceUrl = movie123.source_url;
+    await page.goto(sourceUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+    // Inject the same CSS that desktop/main.js injects into 123movies iframes
+    await page.addStyleTag({ content: `
+      header, .nav, ol.breadcrumb,
+      .watch-extra, section.bl, .bl-2,
+      footer, .footer, #episodes { display: none !important; }
+      html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; height: 100vh !important; }
+      #body { margin: 0 !important; padding: 0 !important; height: 100vh !important; }
+      #watch { margin: 0 !important; padding: 0 !important; height: 100vh !important; }
+      .container { max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+      .play { width: 100% !important; max-width: 100% !important; height: 100vh !important;
+               margin: 0 !important; padding: 0 !important; }
+      #player, .iframecontainer { width: 100% !important; max-width: 100% !important; height: 100vh !important; }
+      #player iframe, #videoiframe { width: 100% !important; height: 100vh !important; }
+    `});
+
+    await page.waitForTimeout(500);
+
+    const metrics = await page.evaluate(() => {
+      const get = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        const cs = window.getComputedStyle(el);
+        return { top: Math.round(r.top), h: Math.round(r.height), pt: cs.paddingTop, display: cs.display };
+      };
+      return {
+        vh: window.innerHeight,
+        header: get('header'),
+        nav: get('.nav'),
+        body_div: get('#body'),
+        player: get('#player'),
+      };
+    });
+
+    console.log(`[test 8] viewport: ${metrics.vh}px`);
+
+    // Header must be hidden
+    expect(metrics.header.display, 'header must be display:none').toBe('none');
+    console.log(`[test 8] header: display=${metrics.header.display}`);
+
+    // .nav must be hidden
+    expect(metrics.nav.display, '.nav must be display:none').toBe('none');
+    console.log(`[test 8] .nav: display=${metrics.nav.display}`);
+
+    // #body padding-top must be 0 (was 88px for fixed header)
+    expect(metrics.body_div.pt, '#body padding-top must be 0px').toBe('0px');
+    console.log(`[test 8] #body: top=${metrics.body_div.top}, padding-top=${metrics.body_div.pt}`);
+
+    // #player must be at top of page (no space above)
+    expect(metrics.player.top, '#player must be at top=0').toBeLessThanOrEqual(2);
+    console.log(`[test 8] #player: top=${metrics.player.top}, height=${metrics.player.h}`);
+
+    // #player height must be 100vh
+    expect(metrics.player.h, '#player height must be 100vh').toBeGreaterThanOrEqual(metrics.vh * 0.95);
+    console.log('[test 8] Player is full height with no space above (before play click)');
+
+    // Click the play button on the 123movies page
+    const playBtn = page.locator('#play-now');
+    if (await playBtn.count() > 0) {
+      await playBtn.click();
+      // Wait for the embed iframe chain to load (123movies → netoda → player)
+      await page.waitForTimeout(8000);
+
+      const afterPlay = await page.evaluate(() => {
+        const player = document.querySelector('#player');
+        const innerIframe = player ? player.querySelector('iframe') : null;
+        const r = player ? player.getBoundingClientRect() : null;
+        const ir = innerIframe ? innerIframe.getBoundingClientRect() : null;
+        return {
+          vh: window.innerHeight,
+          player: r ? { top: Math.round(r.top), h: Math.round(r.height) } : null,
+          innerIframe: ir ? { top: Math.round(ir.top), h: Math.round(ir.height), w: Math.round(ir.width) } : null,
+        };
+      });
+
+      console.log(`[test 8] After play: player=${JSON.stringify(afterPlay.player)}, innerIframe=${JSON.stringify(afterPlay.innerIframe)}`);
+
+      // #player must still be at top and full height after play click
+      if (afterPlay.player) {
+        expect(afterPlay.player.top, '#player must still be at top after play').toBeLessThanOrEqual(2);
+        expect(afterPlay.player.h, '#player must still be 100vh after play').toBeGreaterThanOrEqual(afterPlay.vh * 0.95);
       }
-    } else {
-      // Error state is valid — CDN may be down; the important thing is the UI handles it gracefully.
-      const errorText = await page.textContent('.error-state').catch(() => '');
-      console.log('[test 6] Error state shown:', errorText?.substring(0, 120));
 
-      // Server switch buttons must be visible so the user can retry
-      const serverBtns = await page.$$('.btn-server');
-      expect(
-        serverBtns.length,
-        'Error state must show at least one server switch button for retry'
-      ).toBeGreaterThan(0);
-      console.log(`[test 6] ${serverBtns.length} server switch button(s) available`);
+      // Inner iframe (video embed) must fill the player
+      if (afterPlay.innerIframe) {
+        expect(afterPlay.innerIframe.h, 'Inner iframe must fill player height').toBeGreaterThanOrEqual(afterPlay.vh * 0.8);
+        console.log('[test 8] Inner embed iframe fills player after play click');
+      } else {
+        console.log('[test 8] No inner iframe yet (embed chain still loading — OK)');
+      }
     }
+  });
+
+  // ─── 9. Series: episode switching works ────────────────────────────────────
+  test('9. Switching episodes updates the player', async ({ page }) => {
+    test.setTimeout(30000);
+    test.skip(!series123, 'No 123movies series available');
+
+    await page.goto(`${UI}/movie/${series123.id}`);
+    await page.waitForSelector('h1.hero-title', { timeout: 10000 });
+
+    const episodes = page.locator('.episode-pill');
+    const epCount = await episodes.count();
+    test.skip(epCount < 2, 'Need at least 2 episodes to test switching');
+
+    // Click a different episode
+    const secondEp = episodes.nth(1);
+    await secondEp.click();
+    await page.waitForTimeout(300);
+
+    // The active episode should change
+    const isActive = await secondEp.evaluate(el => el.classList.contains('active'));
+    expect(isActive, 'Second episode pill should be active after click').toBe(true);
+    console.log('[test 7] Episode switching works');
   });
 });

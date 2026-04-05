@@ -122,17 +122,21 @@ async function createWindow() {
               s.textContent = \`
                 header, .nav, ol.breadcrumb,
                 .watch-extra, section.bl, .bl-2,
-                footer, .footer { display: none !important; }
+                footer, .footer, #episodes { display: none !important; }
 
-                body { margin: 0 !important; padding: 0 !important; overflow-x: hidden !important; }
+                html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; height: 100vh !important; }
 
-                .container { max-width: 100% !important; width: 100% !important; padding: 0 !important; }
+                #body { margin: 0 !important; padding: 0 !important; height: 100vh !important; }
 
-                #player, .iframecontainer { width: 100% !important; max-width: 100% !important; min-height: 400px !important; height: 60vh !important; }
-                #player iframe, #videoiframe { width: 100% !important; height: 100% !important; min-height: 400px !important; }
+                #watch { margin: 0 !important; padding: 0 !important; height: 100vh !important; }
 
-                .play { width: 100% !important; max-width: 100% !important;
-                         background-size: cover !important; }
+                .container { max-width: 100% !important; width: 100% !important; padding: 0 !important; margin: 0 !important; }
+
+                .play { width: 100% !important; max-width: 100% !important; height: 100vh !important;
+                         margin: 0 !important; padding: 0 !important; background-size: cover !important; }
+
+                #player, .iframecontainer { width: 100% !important; max-width: 100% !important; height: 100vh !important; }
+                #player iframe, #videoiframe { width: 100% !important; height: 100vh !important; }
 
                 /* Hide poster once the video player iframe loads inside #player */
                 .play:has(#player iframe) {

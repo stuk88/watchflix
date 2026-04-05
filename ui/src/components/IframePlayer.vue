@@ -43,7 +43,6 @@ function startPlayer() {
   min-height: 300px;
   cursor: pointer;
   background: #0a0a1a;
-  border-radius: 8px;
   transition: background 0.2s;
 }
 .player-start:hover { background: #111128; }
@@ -60,21 +59,20 @@ function startPlayer() {
 .iframe-wrap {
   width: 100%;
   background: #000;
-  border-radius: 8px;
   overflow: hidden;
 }
 .player-iframe {
   width: 100%;
-  height: 80vh;
+  height: 100vh;
   border: none;
   display: block;
 }
 @media (max-width: 768px) {
   .player-start { min-height: 200px; }
   .start-icon { font-size: 36px; }
-  .player-iframe { height: 60vh; }
+  .player-iframe { height: 100vh; }
 }
 @media (max-width: 480px) {
-  .player-iframe { height: 50vh; }
+  .player-iframe { height: 100vh; }
 }
 </style>

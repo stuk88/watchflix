@@ -6,11 +6,11 @@ Stream movies and TV shows from multiple sources. Desktop app built with Electro
 
 | Platform | Download |
 |----------|----------|
-| macOS (Apple Silicon) | [Watchflix-1.0.0-arm64.dmg](https://github.com/stuk88/watchflix/releases/latest) |
-| macOS (Intel) | [Watchflix-1.0.0.dmg](https://github.com/stuk88/watchflix/releases/latest) |
-| Windows | [Watchflix Setup 1.0.0.exe](https://github.com/stuk88/watchflix/releases/latest) |
-| Linux (AppImage) | [Watchflix-1.0.0.AppImage](https://github.com/stuk88/watchflix/releases/latest) |
-| Linux (tar.gz) | [watchflix-desktop-1.0.0.tar.gz](https://github.com/stuk88/watchflix/releases/latest) |
+| macOS (Apple Silicon) | [Watchflix-v1.0.0-mac-arm64.dmg](https://github.com/stuk88/watchflix/releases/latest) |
+| macOS (Intel) | [Watchflix-v1.0.0-mac-x64.dmg](https://github.com/stuk88/watchflix/releases/latest) |
+| Windows | [Watchflix-v1.0.0-win-x64.exe](https://github.com/stuk88/watchflix/releases/latest) |
+| Linux (AppImage) | [Watchflix-v1.0.0-linux-x86_64.AppImage](https://github.com/stuk88/watchflix/releases/latest) |
+| Linux (tar.gz) | [Watchflix-v1.0.0-linux-x64.tar.gz](https://github.com/stuk88/watchflix/releases/latest) |
 
 Or visit the [download page](https://stuk88.github.io/watchflix/).
 

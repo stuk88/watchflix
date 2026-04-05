@@ -21,6 +21,7 @@
       <div class="card-play"></div>
       <div class="card-title">{{ movie.title }}</div>
       <div class="card-meta">
+        <span v-if="firstGenre" class="genre-badge">{{ firstGenre }}</span>
         <span v-if="movie.year">{{ movie.year }}</span>
         <span v-if="movie.type === 'series'" class="series-badge">
           📺 {{ seasonLabel }}
@@ -39,6 +40,8 @@ import { computed } from 'vue';
 
 const props = defineProps({ movie: Object, canUnhide: Boolean });
 defineEmits(['toggle-fav', 'hide', 'unhide']);
+
+const firstGenre = computed(() => props.movie.genre?.split(',')[0]?.trim() || null);
 
 const ratingClass = computed(() => {
   const r = props.movie.imdb_rating;

@@ -26,11 +26,11 @@ test.describe('Torrent Play', () => {
     await page.goto(`${UI_BASE}/movie/${movie.id}`);
 
     // Click the start streaming button
-    await page.click('text=Start Streaming via WebTorrent');
+    await page.locator('.player-start').click();
 
     // Within 20s either the video element appears or the no-peers fallback
     await expect(
-      page.locator('video.player-video, .fallback-msg, .fallback-dead, .fallback-alts')
+      page.locator('video.player-video, .fallback-msg, .fallback-dead, .fallback-alts').first()
     ).toBeVisible({ timeout: 20000 });
   });
 
@@ -69,7 +69,7 @@ test.describe('Torrent Play', () => {
     });
 
     // Click play
-    await page.click('text=Start Streaming via WebTorrent');
+    await page.locator('.player-start').click();
 
     // Wait for the torrent player UI to appear
     await expect(page.locator('.torrent-info')).toBeVisible({ timeout: 15000 });
@@ -110,7 +110,7 @@ test.describe('Torrent Play', () => {
     });
 
     await page.goto(`${UI_BASE}/movie/${movie.id}`);
-    await page.click('text=Start Streaming via WebTorrent');
+    await page.locator('.player-start').click();
 
     // The .fallback-alts div should appear after 15s once numPeers === 0
     // For test verification, check it renders properly when visible
@@ -158,7 +158,7 @@ test.describe('Torrent Play', () => {
     });
 
     await page.goto(`${UI_BASE}/movie/${movie.id}`);
-    await page.click('text=Start Streaming via WebTorrent');
+    await page.locator('.player-start').click();
 
     await page.clock.install();
     await page.clock.fastForward(16000);

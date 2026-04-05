@@ -235,9 +235,13 @@ a { color: inherit; text-decoration: none; }
 }
 .card-play::after {
   content: '';
-  border: 8px solid transparent;
+  display: block;
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
   border-left: 14px solid #111;
-  margin-left: 4px;
+  margin-left: 3px;
 }
 
 .genre-badge {
@@ -514,9 +518,10 @@ a { color: inherit; text-decoration: none; }
   margin-bottom: 16px;
 }
 
-/* Player Section — full viewport width, breaks out of content max-width */
+/* Player Section — full viewport width, no spacing above player */
 .player-section {
-  margin-bottom: 24px;
+  margin: 0;
+  padding: 0;
 }
 
 /* Pagination */

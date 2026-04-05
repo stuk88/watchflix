@@ -4,7 +4,7 @@ import db from '../db.js';
 import config, { isAllowedProxyUrl } from '../config.js';
 import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats } from '../services/streamer.js';
-import { extractStreamUrl, getAvailableServers } from '../services/stream-extractor.js';
+import { extractEmbedUrl, getAvailableServers } from '../services/stream-extractor.js';
 import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -617,89 +617,26 @@ router.post('/:id/whisper-sync', async (req, res) => {
 });
 
 // ============================================================
-// 123movies Direct Streaming (HLS extraction)
+// 123movies Embed Player
 // ============================================================
 
-// Get HLS stream URL from 123movies embed
-router.get('/:id/123stream', async (req, res) => {
+// Get embed iframe URL from 123movies (same iframe the site loads)
+router.get('/:id/123embed', async (req, res) => {
   const server = parseInt(req.query.server) || 2;
 
   try {
-    const result = await extractStreamUrl(req.params.id, server);
+    const result = await extractEmbedUrl(req.params.id, server);
     res.json({
-      m3u8: `/api/movies/${req.params.id}/123proxy?url=${encodeURIComponent(result.m3u8)}`,
-      subtitles: result.subtitles,
+      embedUrl: result.embedUrl,
+      server: result.server,
       servers: getAvailableServers(),
     });
   } catch (err) {
-    console.error('[123stream] Extraction error:', err.message);
-    res.status(500).json({ error: 'Failed to extract stream: ' + err.message });
-  }
-});
-
-// Proxy HLS playlist/segments (avoid CORS issues)
-router.get('/:id/123proxy', async (req, res) => {
-  const url = req.query.url;
-  if (!url) return res.status(400).json({ error: 'Missing url param' });
-
-  // Reject non-HTTP URLs early to avoid cryptic "Invalid URL" errors
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    console.error('[123proxy] Invalid URL (not http/https):', url.substring(0, 100));
-    return res.status(400).json({ error: 'Invalid URL: must be http(s)' });
-  }
-
-  try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
-
-  if (!isAllowedProxyUrl(url)) {
-    console.error('[123proxy] Blocked SSRF attempt to:', new URL(url).hostname);
-    return res.status(403).json({ error: 'Domain not allowed' });
-  }
-
-  try {
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer',
-      timeout: 15000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Referer': 'https://embos.net/',
-        'Origin': 'https://embos.net',
-      },
-    });
-
-    // Set appropriate content type
-    const contentType = url.includes('.m3u8')
-      ? 'application/vnd.apple.mpegurl'
-      : url.includes('.ts')
-        ? 'video/mp2t'
-        : response.headers['content-type'] || 'application/octet-stream';
-
-    res.set('Content-Type', contentType);
-    res.set('Access-Control-Allow-Origin', '*');
-
-    // For m3u8 playlists, rewrite segment URLs to go through our proxy
-    if (url.includes('.m3u8')) {
-      let playlist = Buffer.from(response.data).toString('utf8');
-      const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
-
-      // Rewrite relative URLs in the playlist
-      playlist = playlist.replace(/^(?!#)(.+\.ts.*)$/gm, (match) => {
-        const absoluteUrl = match.startsWith('http') ? match : baseUrl + match;
-        return `/api/movies/${req.params.id}/123proxy?url=${encodeURIComponent(absoluteUrl)}`;
-      });
-
-      // Also rewrite .m3u8 references (for multi-quality master playlists)
-      playlist = playlist.replace(/^(?!#)(.+\.m3u8.*)$/gm, (match) => {
-        const absoluteUrl = match.startsWith('http') ? match : baseUrl + match;
-        return `/api/movies/${req.params.id}/123proxy?url=${encodeURIComponent(absoluteUrl)}`;
-      });
-
-      res.send(playlist);
-    } else {
-      res.send(Buffer.from(response.data));
+    console.error('[123embed] Extraction error:', err.message);
+    if (err.message === 'Movie not found') {
+      return res.status(404).json({ error: err.message });
     }
-  } catch (err) {
-    console.error('[123proxy] Error:', err.message);
-    res.status(502).json({ error: 'Proxy fetch failed' });
+    res.status(500).json({ error: 'Failed to extract embed: ' + err.message });
   }
 });
 
