@@ -58,17 +58,26 @@ const seasonLabel = computed(() => {
   return s ? `S${s} • ${count} ep` : `${count} episodes`;
 });
 
+const russianSources = ['hdrezka', 'seazonvar', 'filmix'];
+
 const sourceClass = computed(() => {
   const s = props.movie.source;
   if (s === 'both') return 'sboth';
   if (s === 'torrent') return 'storrent';
+  if (russianSources.includes(s)) return 'sru';
   return 's123';
 });
 
+const sourceLabelMap = {
+  both: 'Both',
+  torrent: 'Torrent',
+  '123movies': '123M',
+  hdrezka: 'HDR',
+  seazonvar: 'SZV',
+  filmix: 'FLX',
+};
+
 const sourceLabel = computed(() => {
-  const s = props.movie.source;
-  if (s === 'both') return 'Both';
-  if (s === 'torrent') return 'Torrent';
-  return '123M';
+  return sourceLabelMap[props.movie.source] || props.movie.source || '123M';
 });
 </script>

@@ -5,6 +5,7 @@ import { requireAuth } from './middleware/auth.js';
 import moviesRouter from './routes/movies.js';
 import sourcesRouter from './routes/sources.js';
 import torrentSearchRouter from './routes/torrent-search.js';
+import russianSearchRouter from './routes/russian-search.js';
 import { startScheduler } from './services/scheduler.js';
 
 const app = express();
@@ -17,6 +18,7 @@ app.use('/api', requireAuth);
 app.use('/api/movies', moviesRouter);
 app.use('/api/scrape', sourcesRouter);
 app.use('/api/torrent-search', torrentSearchRouter);
+app.use('/api/russian-search', russianSearchRouter);
 
 // Serve the built UI when bundled with the desktop app (UI_DIST is set by the Electron main process).
 if (process.env.UI_DIST) {

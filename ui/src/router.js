@@ -6,6 +6,7 @@ const routes = [
   { path: '/favorites', name: 'favorites', component: () => import('./views/Favorites.vue') },
   { path: '/hidden', name: 'hidden', component: () => import('./views/Hidden.vue') },
   { path: '/torrent-search', name: 'torrent-search', component: () => import('./views/TorrentSearch.vue') },
+  { path: '/russian-search', name: 'russian-search', component: () => import('./views/RussianSearch.vue') },
 ];
 
 export default createRouter({

@@ -16,6 +16,7 @@
         <router-link to="/favorites" class="nav-link">★ Favorites</router-link>
         <router-link to="/hidden" class="nav-link">🙈 Hidden</router-link>
         <router-link to="/torrent-search" class="nav-link">Torrent Search</router-link>
+        <router-link to="/russian-search" class="nav-link">🇷🇺 RU Search</router-link>
         <button class="btn-scrape" @click="store.triggerScrape()" :disabled="store.scraping">
           {{ store.scraping ? '⏳ Scraping...' : '🔄 Update' }}
         </button>

@@ -83,36 +83,44 @@
 
   <!-- Player section — full width, outside the max-width constraint -->
   <div v-if="movie" class="player-section">
-    <!-- Source Tabs -->
-    <div class="source-tabs" v-if="hasBothSources">
-      <button class="source-tab" :class="{ active: activeTab === '123movies' }" @click="activeTab = '123movies'">
-        🌐 Watch Online
-      </button>
-      <button class="source-tab" :class="{ active: activeTab === 'torrent' }" @click="activeTab = 'torrent'">
-        🧲 Torrent Stream
-      </button>
+    <!-- Russian source: direct iframe player -->
+    <div v-if="isRussianSource">
+      <IframePlayer :source-url="activeEpisode.source_url" :source-name="movie.source" />
     </div>
 
-    <!-- 123Movies Iframe Player -->
-    <div v-if="show123">
-      <IframePlayer :source-url="activeEpisode.source_url" />
-    </div>
+    <!-- English sources: tabs for dual source -->
+    <template v-else>
+      <!-- Source Tabs -->
+      <div class="source-tabs" v-if="hasBothSources">
+        <button class="source-tab" :class="{ active: activeTab === '123movies' }" @click="activeTab = '123movies'">
+          🌐 Watch Online
+        </button>
+        <button class="source-tab" :class="{ active: activeTab === 'torrent' }" @click="activeTab = 'torrent'">
+          🧲 Torrent Stream
+        </button>
+      </div>
 
-    <!-- Torrent Player -->
-    <div v-if="showTorrent">
-      <TorrentPlayer :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
-    </div>
-
-    <!-- Single source -->
-    <div v-if="!hasBothSources">
-      <div v-if="activeEpisode.source_url && activeEpisode.source !== 'torrent'">
+      <!-- 123Movies Iframe Player -->
+      <div v-if="show123">
         <IframePlayer :source-url="activeEpisode.source_url" />
       </div>
-      <TorrentPlayer v-else-if="activeEpisode.torrent_magnet" :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
-      <div v-else class="empty-state">
-        <p>No streaming source available</p>
+
+      <!-- Torrent Player -->
+      <div v-if="showTorrent">
+        <TorrentPlayer :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
       </div>
-    </div>
+
+      <!-- Single source -->
+      <div v-if="!hasBothSources">
+        <div v-if="activeEpisode.source_url && activeEpisode.source !== 'torrent'">
+          <IframePlayer :source-url="activeEpisode.source_url" />
+        </div>
+        <TorrentPlayer v-else-if="activeEpisode.torrent_magnet" :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
+        <div v-else class="empty-state">
+          <p>No streaming source available</p>
+        </div>
+      </div>
+    </template>
   </div>
 
   <div v-else class="content loading">Loading movie...</div>
@@ -154,6 +162,7 @@ onMounted(async () => {
 
   // Default to available source
   if (data.source === 'torrent') activeTab.value = 'torrent';
+  else if (['hdrezka', 'seazonvar', 'filmix'].includes(data.source)) activeTab.value = data.source;
   else activeTab.value = '123movies';
 
   // If series, fetch all episodes
@@ -174,6 +183,9 @@ function selectEpisode(ep) {
   axios.patch(`/api/movies/${ep.id}/watched`);
 }
 
+const russianSources = ['hdrezka', 'seazonvar', 'filmix'];
+const isRussianSource = computed(() => russianSources.includes(movie.value?.source));
+
 const hasBothSources = computed(() => activeEpisode.value?.source === 'both');
 const show123 = computed(() => hasBothSources.value && activeTab.value === '123movies');
 const showTorrent = computed(() => hasBothSources.value && activeTab.value === 'torrent');
@@ -182,14 +194,21 @@ const sourceClass = computed(() => {
   const s = movie.value?.source;
   if (s === 'both') return 'sboth';
   if (s === 'torrent') return 'storrent';
+  if (russianSources.includes(s)) return 'sru';
   return 's123';
 });
 
+const sourceLabelMap = {
+  both: 'Both Sources',
+  torrent: 'Torrent',
+  '123movies': '123Movies',
+  hdrezka: 'Hdrezka',
+  seazonvar: 'Seazonvar',
+  filmix: 'Filmix',
+};
+
 const sourceLabel = computed(() => {
-  const s = movie.value?.source;
-  if (s === 'both') return 'Both Sources';
-  if (s === 'torrent') return 'Torrent';
-  return '123Movies';
+  return sourceLabelMap[movie.value?.source] || movie.value?.source || '123Movies';
 });
 
 function ratingClass(score) {

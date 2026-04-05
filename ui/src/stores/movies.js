@@ -19,6 +19,7 @@ export const useMoviesStore = defineStore('movies', {
       min_rating: 6,
       search: '',
       type: 'all',
+      language: 'en',
     },
   }),
 
@@ -30,6 +31,7 @@ export const useMoviesStore = defineStore('movies', {
         if (!params.genre) delete params.genre;
         if (params.source === 'all') delete params.source;
         if (params.type === 'all') delete params.type;
+        if (params.language === 'all') delete params.language;
         const { data } = await axios.get('/api/movies', { params });
         this.movies = data.movies;
         this.total = data.total;
@@ -52,6 +54,7 @@ export const useMoviesStore = defineStore('movies', {
         if (!params.genre) delete params.genre;
         if (params.source === 'all') delete params.source;
         if (params.type === 'all') delete params.type;
+        if (params.language === 'all') delete params.language;
         const { data } = await axios.get('/api/movies', { params });
         this.movies = [...this.movies, ...data.movies];
         this.page = data.page;
