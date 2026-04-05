@@ -21,7 +21,9 @@ export const proxyAllowedDomains = [
   'hdrezka.ag',
   'rezka.ag',
   'sezonvar.org',
+  'seasonvar.org',
   'filmix.fm',
+  'filmix.my',
   'filmix.ac',
 ];
 
@@ -49,7 +51,7 @@ export default {
     movies123: 'https://ww6.123movieshd.com',
     ytsApi: 'https://yts.torrentbay.st/api/v2',
     hdrezka: 'https://hdrezka.ag',
-    seazonvar: 'https://sezonvar.org',
-    filmix: 'https://filmix.fm',
+    seazonvar: 'https://seasonvar.org',
+    filmix: 'https://filmix.my',
   }
 };
