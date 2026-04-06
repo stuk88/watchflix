@@ -248,3 +248,79 @@ describe('Russian Sources - Search Route Logic', () => {
     assert.ok(content.includes('alreadyExists'), 'should indicate when movie already exists');
   });
 });
+
+describe('Russian Sources - min_rating NULL handling', () => {
+  it('movies route allows NULL imdb_rating through min_rating filter', () => {
+    const content = readSrc('routes/movies.js');
+    assert.ok(
+      content.includes('imdb_rating IS NULL'),
+      'min_rating filter should include OR imdb_rating IS NULL so Russian movies (no IMDB rating) are not hidden'
+    );
+  });
+});
+
+describe('Russian Sources - English Titles', () => {
+  it('db.js has title_en migration', () => {
+    const content = readSrc('db.js');
+    assert.ok(content.includes('title_en'), 'should add title_en column');
+  });
+
+  it('movies route search includes title_en', () => {
+    const content = readSrc('routes/movies.js');
+    assert.ok(content.includes('title_en LIKE @search'), 'search should match title_en');
+  });
+
+  it('MovieCard shows title_en when available', () => {
+    const uiDir = join(__dirname, '..', '..', 'ui', 'src');
+    const content = readFileSync(join(uiDir, 'components', 'MovieCard.vue'), 'utf-8');
+    assert.ok(content.includes('movie.title_en'), 'should display title_en');
+  });
+
+  it('Movie detail shows title_en when available', () => {
+    const uiDir = join(__dirname, '..', '..', 'ui', 'src');
+    const content = readFileSync(join(uiDir, 'views', 'Movie.vue'), 'utf-8');
+    assert.ok(content.includes('movie.title_en'), 'should display title_en in hero');
+  });
+
+  it('hdrezka scraper fetches detail pages for series episodes', () => {
+    const content = readSrc('scrapers/hdrezka.js');
+    assert.ok(content.includes('fetchSeriesEpisodes'), 'should fetch episode detail pages');
+    assert.ok(content.includes('b-simple_episodes__list'), 'should parse episode selectors');
+  });
+});
+
+describe('Russian Sources - Playback Integration', () => {
+  it('filmix scraper rejects poster/image URLs', () => {
+    const content = readSrc('scrapers/filmix.js');
+    assert.ok(content.includes('jpg|jpeg|png'), 'should filter out image file extensions');
+    assert.ok(content.includes('thumbs'), 'should filter out thumbs URLs');
+  });
+
+  it('IframePlayer supports Russian source names', () => {
+    const uiDir = join(__dirname, '..', '..', 'ui', 'src');
+    const content = readFileSync(join(uiDir, 'components', 'IframePlayer.vue'), 'utf-8');
+    assert.ok(content.includes('hdrezka'), 'should have hdrezka config');
+    assert.ok(content.includes('filmix'), 'should have filmix config');
+    assert.ok(content.includes('sourceName'), 'should accept sourceName prop');
+  });
+
+  it('Movie.vue forces IframePlayer re-render per episode with :key', () => {
+    const uiDir = join(__dirname, '..', '..', 'ui', 'src');
+    const content = readFileSync(join(uiDir, 'views', 'Movie.vue'), 'utf-8');
+    assert.ok(content.includes(':key="activeEpisodeId"'), 'should use activeEpisodeId as key');
+  });
+
+  it('hdrezka and filmix domains are in proxy allowed list', () => {
+    const content = readSrc('config.js');
+    assert.ok(content.includes('hdrezka.ag'), 'hdrezka.ag allowed');
+    assert.ok(content.includes('filmix.my'), 'filmix.my allowed');
+    assert.ok(content.includes('seasonvar.org'), 'seasonvar.org allowed');
+  });
+
+  it('electron strips X-Frame-Options for all subframes', () => {
+    const desktopDir = join(__dirname, '..', '..', 'desktop');
+    const content = readFileSync(join(desktopDir, 'main.js'), 'utf-8');
+    assert.ok(content.includes('x-frame-options'), 'should strip x-frame-options');
+    assert.ok(content.includes('subFrame'), 'should only target subFrame resources');
+  });
+});
