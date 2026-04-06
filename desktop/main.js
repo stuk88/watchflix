@@ -113,7 +113,10 @@ async function createWindow() {
     if (isMainFrame) return;
     try {
       for (const frame of mainWindow.webContents.mainFrame.framesInSubtree) {
-        if (frame.url.includes('123movie')) {
+        const url = frame.url;
+
+        // --- 123movies ---
+        if (url.includes('123movie')) {
           frame.executeJavaScript(`
             (function() {
               if (document.getElementById('__wf_injected')) return;
@@ -138,23 +141,17 @@ async function createWindow() {
                 #player, .iframecontainer { width: 100% !important; max-width: 100% !important; height: 100vh !important; }
                 #player iframe, #videoiframe { width: 100% !important; height: 100vh !important; }
 
-                /* Hide poster once the video player iframe loads inside #player */
                 .play:has(#player iframe) {
                   background-image: none !important;
                   background: #000 !important;
                 }
               \`;
               document.head.appendChild(s);
-
-              /* kill popup helpers */
               window.open = () => null;
-              /* absorb ad click interceptors on the body/document */
               document.addEventListener('click', function(e) {
                 const t = e.target;
                 if (t.tagName === 'A' && t.target === '_blank') { e.preventDefault(); e.stopPropagation(); }
               }, true);
-
-              /* Fallback for poster hide: observe #player for iframe insertion */
               const playerEl = document.getElementById('player');
               const playEl = document.querySelector('.play');
               if (playerEl && playEl) {
@@ -168,8 +165,169 @@ async function createWindow() {
             })();
           `).catch(() => {});
         }
+
+        // --- Hdrezka ---
+        if (url.includes('hdrezka') || url.includes('rezka')) {
+          frame.executeJavaScript(`
+            (function() {
+              if (document.getElementById('__wf_injected')) return;
+              const s = document.createElement('style');
+              s.id = '__wf_injected';
+              s.textContent = \`
+                /* Hide everything except player + episode selectors */
+                .b-wrapper__sidebar, .b-post__rating_and, .b-post__infotable_right_inner,
+                .b-post__description, .b-post__social, .b-post__mixtures,
+                .b-post__actions, .b-post__rating, .comments-tree-list,
+                .b-content__htitle, .b-content__main > .b-post__lastepisodeout ~ *:not(.b-content__main),
+                header, footer, .b-header, .b-footer,
+                .b-post__schedule, .b-post__franchise_list_item,
+                .b-sidetop, .b-sidelist, .b-ads, .b-post__support,
+                .b-post__info > table, .b-content__bubble_rating,
+                ol.breadcrumb { display: none !important; }
+
+                html, body { margin: 0 !important; padding: 0 !important; background: #000 !important; overflow-x: hidden !important; }
+
+                .b-content__main { padding: 0 !important; margin: 0 auto !important; max-width: 100% !important; }
+
+                /* Player full width */
+                #cdnplayer, .b-player, #cdnplayer-container,
+                .b-player__iframe_container, .b-player iframe {
+                  width: 100% !important; max-width: 100% !important; min-height: 70vh !important;
+                }
+
+                /* Season/episode selectors - keep visible, style clean */
+                .b-simple_season__list, .b-simple_episodes__list,
+                .b-translators__list {
+                  display: flex !important; flex-wrap: wrap !important;
+                  gap: 4px !important; padding: 8px !important;
+                  background: #111 !important;
+                }
+                .b-simple_season__list li, .b-simple_episodes__list li,
+                .b-translators__list li {
+                  padding: 4px 10px !important; border-radius: 4px !important;
+                  background: #222 !important; color: #ccc !important;
+                  cursor: pointer !important; font-size: 13px !important;
+                }
+                .b-simple_season__list li.active, .b-simple_episodes__list li.active,
+                .b-translators__list li.active {
+                  background: #4a6cf7 !important; color: #fff !important;
+                }
+
+                .b-wrapper { max-width: 100% !important; padding: 0 !important; }
+                .b-container { max-width: 100% !important; padding: 0 !important; }
+              \`;
+              document.head.appendChild(s);
+              window.open = () => null;
+              document.addEventListener('click', function(e) {
+                const t = e.target;
+                if (t.tagName === 'A' && t.target === '_blank') { e.preventDefault(); e.stopPropagation(); }
+              }, true);
+            })();
+          `).catch(() => {});
+        }
+
+        // --- Filmix ---
+        if (url.includes('filmix')) {
+          frame.executeJavaScript(`
+            (function() {
+              if (document.getElementById('__wf_injected')) return;
+              const s = document.createElement('style');
+              s.id = '__wf_injected';
+              s.textContent = \`
+                /* Hide everything except player + translation/episode selectors */
+                .header-f, header, footer, nav, .sidebar, .comments,
+                .related, .full-story-line, .full-story__info,
+                .full-story__text, .full-story__rate, .full-story__share,
+                .full-story-header, .full-story-title,
+                .breadcrumbs, .user-favs, .info-panel,
+                .slider-block, .category-film, .footer-f,
+                .full-story__poster, .full-story-desc,
+                .full-story-tables, .full-story-links,
+                .full-story-franchise, .full-story-additional { display: none !important; }
+
+                html, body { margin: 0 !important; padding: 0 !important; background: #000 !important; overflow-x: hidden !important; }
+
+                .content, #dle-content, .full-story, .fullstory {
+                  padding: 0 !important; margin: 0 !important; max-width: 100% !important;
+                }
+
+                /* Player full width */
+                #player, .player, .player iframe, .player video {
+                  width: 100% !important; max-width: 100% !important; min-height: 70vh !important;
+                  margin: 0 !important;
+                }
+
+                /* Translation selector - keep visible */
+                .translations {
+                  display: flex !important; flex-wrap: wrap !important;
+                  gap: 4px !important; padding: 8px !important;
+                  background: #111 !important;
+                }
+                .translations li, .translations a, .translations .item {
+                  padding: 4px 10px !important; border-radius: 4px !important;
+                  background: #222 !important; color: #ccc !important;
+                  cursor: pointer !important; font-size: 13px !important;
+                }
+                .translations .active, .translations .current {
+                  background: #4a6cf7 !important; color: #fff !important;
+                }
+              \`;
+              document.head.appendChild(s);
+              window.open = () => null;
+              document.addEventListener('click', function(e) {
+                const t = e.target;
+                if (t.tagName === 'A' && t.target === '_blank') { e.preventDefault(); e.stopPropagation(); }
+              }, true);
+            })();
+          `).catch(() => {});
+        }
+
+        // --- Seazonvar ---
+        if (url.includes('seasonvar') || url.includes('sezonvar')) {
+          frame.executeJavaScript(`
+            (function() {
+              if (document.getElementById('__wf_injected')) return;
+              const s = document.createElement('style');
+              s.id = '__wf_injected';
+              s.textContent = \`
+                header, footer, nav, .sidebar, .comments,
+                .related, .breadcrumbs, .info-panel,
+                .site-header, .site-footer { display: none !important; }
+
+                html, body { margin: 0 !important; padding: 0 !important; background: #000 !important; overflow-x: hidden !important; }
+
+                #player, .player, .player iframe, .player video {
+                  width: 100% !important; max-width: 100% !important; min-height: 70vh !important;
+                }
+
+                .seasons-list, .episodes-list {
+                  display: flex !important; flex-wrap: wrap !important;
+                  gap: 4px !important; padding: 8px !important;
+                  background: #111 !important;
+                }
+              \`;
+              document.head.appendChild(s);
+              window.open = () => null;
+            })();
+          `).catch(() => {});
+        }
       }
     } catch (_) {}
+  });
+
+  // Clear session cache when navigating away from a movie page (SPA route change).
+  // This deletes cached 123movies iframe content (HTML, JS, video segments) from disk.
+  let wasOnMoviePage = false;
+  mainWindow.webContents.on('did-navigate-in-page', (_event, url) => {
+    const isMoviePage = url.includes('/movie/');
+    if (wasOnMoviePage && !isMoviePage) {
+      console.log('[main] Left movie page — clearing session cache');
+      session.defaultSession.clearCache().catch(() => {});
+      session.defaultSession.clearStorageData({
+        storages: ['cachestorage', 'serviceworkers'],
+      }).catch(() => {});
+    }
+    wasOnMoviePage = isMoviePage;
   });
 
   // Recover from renderer crashes (e.g. V8 crashes from embed content).
