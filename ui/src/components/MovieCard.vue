@@ -19,7 +19,8 @@
     />
     <div class="overlay">
       <div class="card-play"></div>
-      <div class="card-title">{{ movie.title }}</div>
+      <div class="card-title">{{ movie.title_en || movie.title }}</div>
+      <div v-if="movie.title_en && movie.title_en !== movie.title" class="card-title-ru">{{ movie.title }}</div>
       <div class="card-meta">
         <span v-if="firstGenre" class="genre-badge">{{ firstGenre }}</span>
         <span v-if="movie.year">{{ movie.year }}</span>

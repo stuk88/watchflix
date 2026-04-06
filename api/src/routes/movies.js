@@ -3,7 +3,7 @@ import axios from 'axios';
 import db from '../db.js';
 import config, { isAllowedProxyUrl } from '../config.js';
 import { makeMagnet } from '../scrapers/torrents.js';
-import { getVideoFile, getStats } from '../services/streamer.js';
+import { getVideoFile, getStats, destroyTorrent } from '../services/streamer.js';
 import { extractEmbedUrl, getAvailableServers } from '../services/stream-extractor.js';
 import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
 import { execFile } from 'child_process';
@@ -51,11 +51,11 @@ router.get('/', (req, res) => {
     params.source = source;
   }
   if (min_rating) {
-    conditions.push("imdb_rating >= @min_rating");
+    conditions.push("(imdb_rating >= @min_rating OR imdb_rating IS NULL)");
     params.min_rating = parseFloat(min_rating);
   }
   if (search) {
-    conditions.push("(title LIKE @search OR actors LIKE @search OR director LIKE @search)");
+    conditions.push("(title LIKE @search OR title_en LIKE @search OR actors LIKE @search OR director LIKE @search)");
     params.search = `%${search}%`;
   }
   if (language && language !== 'all') {
@@ -347,6 +347,15 @@ router.get('/:id/stream', async (req, res) => {
     console.error('[stream] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Destroy torrent and delete cached files (called when player closes)
+router.delete('/:id/stream', (req, res) => {
+  const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie?.torrent_magnet) return res.json({ ok: false });
+  const destroyed = destroyTorrent(movie.torrent_magnet);
+  console.log(`[stream] Torrent cleanup for movie ${req.params.id}: ${destroyed ? 'destroyed' : 'not active'}`);
+  res.json({ ok: true, destroyed });
 });
 
 // Get torrent streaming stats

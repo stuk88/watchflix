@@ -8,9 +8,10 @@
       </div>
       <div class="hero-info">
         <h1 class="hero-title">
-          {{ movie.title }}
+          {{ movie.title_en || movie.title }}
           <span v-if="isSeries" class="tv-badge">📺 TV Series</span>
         </h1>
+        <div v-if="movie.title_en && movie.title_en !== movie.title" class="hero-title-ru">{{ movie.title }}</div>
         <div class="hero-meta">
           <span v-if="movie.year">{{ movie.year }}</span>
           <span v-if="movie.runtime">{{ movie.runtime }}</span>

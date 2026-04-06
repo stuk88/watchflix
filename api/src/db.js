@@ -72,4 +72,11 @@ try {
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_language ON movies(language)`);
 
+// Migration: add title_en column for original/English title
+try {
+  db.exec(`ALTER TABLE movies ADD COLUMN title_en TEXT`);
+} catch (e) {
+  // Column already exists
+}
+
 export default db;
