@@ -128,8 +128,10 @@ export async function scrapeFilmix(pages = 3) {
         $('.poster-tooltip, .shortstory, .film-poster').each((_, el) => {
           const linkEl = $(el).is('a') ? $(el) : $(el).closest('a[href]').length ? $(el).closest('a[href]') : $(el).find('a[href]').first();
           const href = linkEl.attr('href') || '';
-          // Only accept links with numeric IDs (actual movie/series pages)
+          // Only accept actual movie/series page links (not posters, images, categories)
           if (!href || !/\/\d+/.test(href)) return;
+          if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(href)) return;
+          if (/thumbs\.|posters\//i.test(href)) return;
           const fullUrl = href.startsWith('http') ? href : `${BASE}${href}`;
 
           const title = (linkEl.attr('title') || $(el).find('.name, .shortstory-title').text() || linkEl.text() || '').trim();
