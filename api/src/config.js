@@ -19,6 +19,7 @@ export const proxyAllowedDomains = [
   'vip.openbullet.dev',
   // Russian streaming sources
   'hdrezka.ag',
+  'hdrezka-home.tv',
   'rezka.ag',
   'sezonvar.org',
   'seasonvar.org',
