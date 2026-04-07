@@ -1,10 +1,12 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { chromium } from 'playwright-core';
 import config from '../config.js';
 import db from '../db.js';
 
 const BASE = config.sources.hdrezka;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const BROWSER_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 /**
  * Search Hdrezka for a query string. Returns array of { title, year, url, poster, type }.
@@ -43,52 +45,57 @@ export async function searchHdrezka(query) {
 }
 
 /**
- * Fetch the detail page of a series and extract season/episode info.
- * Hdrezka uses translator-based tabs; episodes listed under .b-simple_episodes__list
+ * Fetch the detail page of a series via Playwright (bypasses Cloudflare)
+ * and extract season/episode info from the rendered DOM.
  */
-async function fetchSeriesEpisodes(seriesUrl) {
+async function fetchSeriesEpisodes(seriesUrl, sharedBrowser = null) {
+  let browser = sharedBrowser;
+  let page;
   try {
-    const { data: html } = await axios.get(seriesUrl, {
-      timeout: 15000,
-      headers: { 'User-Agent': UA },
-    });
-    const $ = cheerio.load(html);
-    const episodes = [];
-
-    // Hdrezka lists seasons in #simple-seasons-tabs or .b-simple_season__list
-    const seasonEls = $('.b-simple_season__list li, #simple-seasons-tabs li');
-    if (seasonEls.length > 0) {
-      // Has explicit season tabs — episodes are listed per season
-      seasonEls.each((_, sEl) => {
-        const seasonNum = parseInt($(sEl).attr('data-tab_id') || $(sEl).text().match(/(\d+)/)?.[1]) || 1;
-        // Episodes for this season
-        const epEls = $(`.b-simple_episodes__list[id*="simple-episodes-list-${seasonNum}"] li, .b-simple_episodes__list li[data-season_id="${seasonNum}"]`);
-        if (epEls.length > 0) {
-          epEls.each((__, eEl) => {
-            const epNum = parseInt($(eEl).attr('data-episode_id') || $(eEl).text().match(/(\d+)/)?.[1]) || 1;
-            const epTitle = $(eEl).text().trim() || null;
-            episodes.push({ season: seasonNum, episode: epNum, episode_title: epTitle });
-          });
-        } else {
-          // No per-episode breakdown; add season as single entry
-          episodes.push({ season: seasonNum, episode: 1, episode_title: `Season ${seasonNum}` });
-        }
+    if (!browser) {
+      browser = await chromium.launch({
+        executablePath: BROWSER_PATH,
+        headless: true,
+        args: ['--disable-blink-features=AutomationControlled'],
       });
-    } else {
-      // No season tabs — try finding episodes directly
-      const epEls = $('.b-simple_episodes__list li');
-      if (epEls.length > 0) {
-        epEls.each((_, eEl) => {
-          const epNum = parseInt($(eEl).attr('data-episode_id') || $(eEl).text().match(/(\d+)/)?.[1]) || 1;
-          const epTitle = $(eEl).text().trim() || null;
-          episodes.push({ season: 1, episode: epNum, episode_title: epTitle });
+    }
+    const context = await browser.newContext({ userAgent: UA });
+    page = await context.newPage();
+    await page.goto(seriesUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+
+    const episodes = await page.evaluate(() => {
+      const eps = [];
+      const seasonEls = document.querySelectorAll('.b-simple_season__list li');
+      if (seasonEls.length > 0) {
+        seasonEls.forEach(sEl => {
+          const seasonNum = parseInt(sEl.getAttribute('data-tab_id') || sEl.textContent.match(/(\d+)/)?.[1]) || 1;
+          const epEls = document.querySelectorAll(`.b-simple_episodes__list li[data-season_id="${seasonNum}"]`);
+          if (epEls.length > 0) {
+            epEls.forEach(eEl => {
+              const epNum = parseInt(eEl.getAttribute('data-episode_id') || eEl.textContent.match(/(\d+)/)?.[1]) || 1;
+              eps.push({ season: seasonNum, episode: epNum, episode_title: eEl.textContent.trim() || null });
+            });
+          } else {
+            eps.push({ season: seasonNum, episode: 1, episode_title: `Season ${seasonNum}` });
+          }
+        });
+      } else {
+        document.querySelectorAll('.b-simple_episodes__list li').forEach(eEl => {
+          const epNum = parseInt(eEl.getAttribute('data-episode_id') || eEl.textContent.match(/(\d+)/)?.[1]) || 1;
+          eps.push({ season: 1, episode: epNum, episode_title: eEl.textContent.trim() || null });
         });
       }
-    }
+      return eps;
+    });
 
+    await page.close();
+    await context.close();
+    if (!sharedBrowser) await browser.close();
     return episodes;
   } catch (err) {
     console.error(`[hdrezka] Failed to fetch episodes from ${seriesUrl}:`, err.message);
+    if (page) await page.close().catch(() => {});
+    if (!sharedBrowser && browser) await browser.close().catch(() => {});
     return [];
   }
 }
@@ -110,10 +117,27 @@ export async function scrapeHdrezka(pages = 3) {
     VALUES (@title, @year, @poster, @genre, @source, @source_url, @language, @type, @series_imdb_id, @season, @episode, @episode_title)
   `);
 
+  // Share one browser for all series episode fetches
+  let sharedBrowser = null;
+
   const categories = ['/films/', '/series/', '/cartoons/'];
 
   for (const category of categories) {
     const isSeries = category.includes('series');
+
+    // Launch shared browser for series categories
+    if (isSeries && !sharedBrowser) {
+      try {
+        sharedBrowser = await chromium.launch({
+          executablePath: BROWSER_PATH,
+          headless: true,
+          args: ['--disable-blink-features=AutomationControlled'],
+        });
+        console.log('[hdrezka] Browser launched for episode scraping');
+      } catch (err) {
+        console.error('[hdrezka] Failed to launch browser:', err.message);
+      }
+    }
 
     for (let page = 1; page <= pages; page++) {
       try {
@@ -156,8 +180,8 @@ export async function scrapeHdrezka(pages = 3) {
             ).get(seriesId);
             if (existingEp) continue;
 
-            // Fetch episode list from detail page
-            const episodes = await fetchSeriesEpisodes(item.href);
+            // Fetch episode list from detail page via Playwright
+            const episodes = await fetchSeriesEpisodes(item.href, sharedBrowser);
 
             if (episodes.length > 0) {
               for (const ep of episodes) {
@@ -223,6 +247,12 @@ export async function scrapeHdrezka(pages = 3) {
         console.error(`[hdrezka] Error on ${category} page ${page}:`, err.message);
       }
     }
+  }
+
+  // Close shared browser
+  if (sharedBrowser) {
+    await sharedBrowser.close().catch(() => {});
+    console.log('[hdrezka] Browser closed');
   }
 
   db.prepare('INSERT INTO scrape_log (source, count) VALUES (?, ?)').run('hdrezka', saved);
