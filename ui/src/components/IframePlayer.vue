@@ -6,7 +6,17 @@
       <div class="start-quality">{{ qualityLabel }}</div>
     </div>
     <div v-else class="iframe-wrap">
+      <!-- Use webview for Russian sources (handles Cloudflare), iframe for 123movies -->
+      <webview
+        v-if="useWebview"
+        ref="webviewEl"
+        :src="sourceUrl"
+        class="player-iframe"
+        allowpopups="false"
+        disablewebsecurity
+      ></webview>
       <iframe
+        v-else
         ref="iframeEl"
         :src="sourceUrl"
         class="player-iframe"
@@ -35,6 +45,9 @@ const sourceLabels = {
   seazonvar: { icon: '📺', label: 'Seazonvar', quality: 'Seazonvar · HD' },
   filmix: { icon: '🎥', label: 'Filmix', quality: 'Filmix · HD' },
 };
+
+const russianSources = ['hdrezka', 'seazonvar', 'filmix'];
+const useWebview = computed(() => russianSources.includes(props.sourceName));
 
 const info = computed(() => sourceLabels[props.sourceName] || sourceLabels['123movies']);
 const icon = computed(() => info.value.icon);
