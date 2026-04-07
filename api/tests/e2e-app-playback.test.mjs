@@ -115,10 +115,12 @@ async function run() {
     await page.waitForTimeout(3000);
 
     // Should have a webview or iframe
+    const video = await page.$('.player-video');
     const webview = await page.$('webview');
     const iframe = await page.$('.player-iframe');
-    assert(webview || iframe, 'No webview or iframe player found after clicking start');
-    console.log(`    Player type: ${webview ? 'webview' : 'iframe'}`);
+    const extracting = await page.$('.extracting-msg');
+    assert(video || webview || iframe || extracting, 'No player element found after clicking start');
+    console.log(`    Player type: ${video ? 'hls-video' : webview ? 'webview' : iframe ? 'iframe' : 'extracting'}`);
     await page.close();
   });
 

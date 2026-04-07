@@ -22,8 +22,10 @@ app.use('/api/russian-search', russianSearchRouter);
 
 // Serve the built UI when bundled with the desktop app (UI_DIST is set by the Electron main process).
 if (process.env.UI_DIST) {
-  app.use(express.static(process.env.UI_DIST));
-  app.get('*', (_, res) => res.sendFile(`${process.env.UI_DIST}/index.html`));
+  const { resolve } = await import('path');
+  const uiDist = resolve(process.env.UI_DIST);
+  app.use(express.static(uiDist));
+  app.get('*', (_, res) => res.sendFile(resolve(uiDist, 'index.html')));
 }
 
 app.listen(config.port, () => {

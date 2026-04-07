@@ -631,6 +631,21 @@ router.post('/:id/whisper-sync', async (req, res) => {
 });
 
 // ============================================================
+// Hdrezka Stream Extraction
+// ============================================================
+
+router.get('/:id/hdrezka-stream', async (req, res) => {
+  try {
+    const { extractHdrezkaStream } = await import('../services/hdrezka-extractor.js');
+    const result = await extractHdrezkaStream(req.params.id);
+    res.json({ streamUrl: result.streamUrl, title: result.title });
+  } catch (err) {
+    console.error('[hdrezka-stream] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // 123movies Embed Player
 // ============================================================
 
