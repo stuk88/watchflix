@@ -91,7 +91,10 @@ async function startPlayer() {
       const { data } = await axios.get(`/api/movies/${props.movieId}/hdrezka-stream`);
       if (!data.streamUrl) throw new Error('No stream URL returned');
 
+      // Stop extracting so the <video> element renders
+      extracting.value = false;
       await nextTick();
+
       const video = hlsVideoEl.value;
       if (!video) return;
 
@@ -100,12 +103,12 @@ async function startPlayer() {
         hlsInstance.loadSource(data.streamUrl);
         hlsInstance.attachMedia(video);
       } else {
+        // Fallback: direct URL (mp4 or native HLS on Safari)
         video.src = data.streamUrl;
       }
     } catch (err) {
-      extractError.value = 'Failed to extract stream: ' + (err.response?.data?.error || err.message);
-    } finally {
       extracting.value = false;
+      extractError.value = 'Failed to extract stream: ' + (err.response?.data?.error || err.message);
     }
   }
 }
@@ -144,13 +147,13 @@ onUnmounted(() => {
 }
 .player-iframe {
   width: 100%;
-  height: 75vh;
+  height: 100vh;
   border: none;
   display: block;
 }
 .player-video {
   width: 100%;
-  max-height: 75vh;
+  max-height: 100vh;
   background: #000;
   display: block;
 }
