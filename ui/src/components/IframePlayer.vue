@@ -58,7 +58,7 @@ const sourceLabels = {
   filmix: { icon: '🎥', label: 'Filmix', quality: 'Filmix · HD' },
 };
 
-const hlsSources = ['hdrezka'];
+const hlsSources = ['hdrezka', 'seazonvar'];
 const useHlsPlayer = computed(() => hlsSources.includes(props.sourceName));
 
 const info = computed(() => sourceLabels[props.sourceName] || sourceLabels['123movies']);
@@ -88,7 +88,12 @@ async function startPlayer() {
     extracting.value = true;
     extractError.value = '';
     try {
-      const { data } = await axios.get(`/api/movies/${props.movieId}/hdrezka-stream`);
+      const endpointMap = {
+        hdrezka: 'hdrezka-stream',
+        seazonvar: 'seazonvar-stream',
+      };
+      const endpoint = endpointMap[props.sourceName] || 'hdrezka-stream';
+      const { data } = await axios.get(`/api/movies/${props.movieId}/${endpoint}`);
       if (!data.streamUrl) throw new Error('No stream URL returned');
 
       // Stop extracting so the <video> element renders

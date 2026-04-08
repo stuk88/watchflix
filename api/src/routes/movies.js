@@ -646,6 +646,21 @@ router.get('/:id/hdrezka-stream', async (req, res) => {
 });
 
 // ============================================================
+// Seazonvar Stream Extraction
+// ============================================================
+
+router.get('/:id/seazonvar-stream', async (req, res) => {
+  try {
+    const { extractSeazonvarStream } = await import('../services/seazonvar-extractor.js');
+    const result = await extractSeazonvarStream(req.params.id);
+    res.json({ streamUrl: result.streamUrl, title: result.title });
+  } catch (err) {
+    console.error('[seazonvar-stream] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // 123movies Embed Player
 // ============================================================
 
