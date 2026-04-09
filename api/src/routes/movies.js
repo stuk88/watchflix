@@ -646,6 +646,21 @@ router.get('/:id/hdrezka-stream', async (req, res) => {
 });
 
 // ============================================================
+// Filmix Stream Extraction
+// ============================================================
+
+router.get('/:id/filmix-stream', async (req, res) => {
+  try {
+    const { extractFilmixStream } = await import('../services/filmix-extractor.js');
+    const result = await extractFilmixStream(req.params.id);
+    res.json({ streamUrl: result.streamUrl, title: result.title });
+  } catch (err) {
+    console.error('[filmix-stream] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // Seazonvar Stream Extraction
 // ============================================================
 

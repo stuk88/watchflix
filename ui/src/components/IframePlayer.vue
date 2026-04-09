@@ -58,7 +58,7 @@ const sourceLabels = {
   filmix: { icon: '🎥', label: 'Filmix', quality: 'Filmix · HD' },
 };
 
-const hlsSources = ['hdrezka', 'seazonvar'];
+const hlsSources = ['hdrezka', 'seazonvar', 'filmix'];
 const useHlsPlayer = computed(() => hlsSources.includes(props.sourceName));
 
 const info = computed(() => sourceLabels[props.sourceName] || sourceLabels['123movies']);
@@ -91,6 +91,7 @@ async function startPlayer() {
       const endpointMap = {
         hdrezka: 'hdrezka-stream',
         seazonvar: 'seazonvar-stream',
+        filmix: 'filmix-stream',
       };
       const endpoint = endpointMap[props.sourceName] || 'hdrezka-stream';
       const { data } = await axios.get(`/api/movies/${props.movieId}/${endpoint}`);

@@ -81,6 +81,24 @@ function scheduleCleanup(hash) {
   setTimeout(check, 60000);
 }
 
+/**
+ * Immediately destroy a torrent and delete its downloaded files.
+ * Called when the player closes to free disk space.
+ */
+export function destroyTorrent(magnet) {
+  const hashMatch = magnet.match(/btih:([a-fA-F0-9]+)/);
+  const hash = hashMatch ? hashMatch[1].toUpperCase() : null;
+  if (!hash) return false;
+
+  const entry = activeStreams.get(hash);
+  if (!entry) return false;
+
+  console.log(`[streamer] Destroying torrent on player close: ${hash.substring(0, 8)}...`);
+  try { entry.torrent.destroy(); } catch {}
+  activeStreams.delete(hash);
+  return true;
+}
+
 export function getStats(magnet) {
   const hashMatch = magnet.match(/btih:([a-fA-F0-9]+)/);
   const hash = hashMatch ? hashMatch[1].toUpperCase() : null;
