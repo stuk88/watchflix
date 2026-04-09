@@ -10,9 +10,9 @@
         <video
           ref="videoEl"
           controls
-          autoplay
           class="player-video"
           :src="streamUrl"
+          @loadeddata="$event.target.play().catch(()=>{})"
           @error="onVideoError"
         ></video>
       </div>
