@@ -20,9 +20,17 @@
         />
       </div>
 
-      <div ref="loadMoreEl" class="load-more-bar">
-        <div v-if="store.loadingMore" class="load-more-trigger">Loading...</div>
-        <div v-else-if="store.page >= store.pages && store.movies.length > 0" class="all-loaded">
+      <div class="load-more-bar">
+        <button
+          v-if="store.page < store.pages"
+          ref="loadMoreBtn"
+          class="btn-load-more"
+          :disabled="store.loadingMore"
+          @click="store.fetchMoreMovies()"
+        >
+          {{ store.loadingMore ? 'Loading...' : 'Load More' }}
+        </button>
+        <div v-else-if="store.movies.length > 0" class="all-loaded">
           ✓ All {{ store.total }} movies loaded
         </div>
       </div>
@@ -37,7 +45,7 @@ import MovieCard from '../components/MovieCard.vue';
 import FilterBar from '../components/FilterBar.vue';
 
 const store = useMoviesStore();
-const loadMoreEl = ref(null);
+const loadMoreBtn = ref(null);
 let observer = null;
 
 function createObserver() {
@@ -49,8 +57,8 @@ function createObserver() {
   }, { rootMargin: '400px' });
 }
 
-// Re-observe whenever the ref element changes (appears/disappears with v-else)
-watch(loadMoreEl, (el) => {
+// Auto-load when Load More button scrolls into view
+watch(loadMoreBtn, (el) => {
   if (!observer) createObserver();
   if (el) observer.observe(el);
 });
