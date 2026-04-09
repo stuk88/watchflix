@@ -52,6 +52,33 @@ async function fetchFromApi(searchPath) {
 }
 
 /**
+ * Fetch Hebrew subtitles from Wizdom.xyz (Israeli subtitle site).
+ * Returns files in the same format as OpenSubtitles results.
+ */
+async function fetchFromWizdom(imdbId) {
+  try {
+    const { data } = await axios.get('https://wizdom.xyz/api/search', {
+      params: { action: 'by_id', imdb: imdbId, version: 'all' },
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 10000,
+    });
+    if (!Array.isArray(data) || data.length === 0) return [];
+    return data.map(item => ({
+      MatchedBy: 'wizdom',
+      SubFileName: item.versioname + '.srt',
+      SubDownloadLink: `https://wizdom.xyz/api/files/sub/${item.id}`,
+      SubDownloadsCnt: '0',
+      SubFormat: 'srt',
+      ISO639: 'he',
+      LanguageName: 'Hebrew',
+      Score: 10,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Fetch subtitle tracks for a movie from OpenSubtitles API v1.
  * Returns array of { language, label, files: [{ filename, url, score, downloads, format }] }.
  */
@@ -66,18 +93,28 @@ export async function fetchSubtitles(movieId) {
   const numericId = imdbId.replace(/^tt/, '');
 
   try {
-    const data = await fetchFromApi(`/imdbid-${numericId}`);
-    if (data.length === 0) {
+    // Fetch from OpenSubtitles and Wizdom (Hebrew) in parallel
+    const [osData, wizdomData] = await Promise.allSettled([
+      fetchFromApi(`/imdbid-${numericId}`),
+      fetchFromWizdom(imdbId),
+    ]);
+
+    const allData = [
+      ...(osData.status === 'fulfilled' ? osData.value : []),
+      ...(wizdomData.status === 'fulfilled' ? wizdomData.value : []),
+    ];
+
+    if (allData.length === 0) {
       cache.set(imdbId, { tracks: [], expiry: Date.now() + CACHE_TTL });
       return [];
     }
 
-    const tracks = groupByLang(data);
+    const tracks = groupByLang(allData);
     cache.set(imdbId, { tracks, expiry: Date.now() + CACHE_TTL });
     console.log(`[subtitles] Found ${tracks.length} languages for IMDB ${imdbId}`);
     return tracks;
   } catch (err) {
-    console.error('[subtitles] OpenSubtitles v1 fetch error:', err.message);
+    console.error('[subtitles] Subtitle fetch error:', err.message);
     cache.set(imdbId, { tracks: [], expiry: Date.now() + CACHE_TTL });
     return [];
   }

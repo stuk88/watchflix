@@ -16,6 +16,7 @@ export const proxyAllowedDomains = [
   'rapid-cloud.co',
   'opensubtitles.com',
   'dl.opensubtitles.org',
+  'wizdom.xyz',
   'vip.openbullet.dev',
   // Russian streaming sources
   'hdrezka.ag',
