@@ -66,6 +66,7 @@
 
     <!-- Episode list (series only) -->
     <div v-if="isSeries && seasons[activeSeason]" class="episode-list-wrap">
+      <h3 class="episode-section-title">Episodes — Season {{ activeSeason }}</h3>
       <div class="episode-list">
         <button
           v-for="ep in seasons[activeSeason]"
