@@ -6,6 +6,16 @@
       <div class="start-quality" v-if="quality">{{ quality }}</div>
     </div>
     <div v-else>
+      <!-- Loading / buffering indicator -->
+      <div v-if="status === 'loading'" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Connecting to peers...</div>
+      </div>
+      <div v-if="status === 'playing' && progress < 5" class="buffering-bar">
+        <div class="buffer-fill" :style="{ width: progress + '%' }"></div>
+        <span class="buffer-text">Buffering {{ progress }}%</span>
+      </div>
+
       <div class="video-wrap">
         <video
           ref="videoEl"
@@ -13,6 +23,11 @@
           :src="streamUrl"
           @error="onVideoError"
         ></video>
+      </div>
+
+      <!-- Download progress bar -->
+      <div class="download-bar">
+        <div class="download-fill" :style="{ width: progress + '%' }"></div>
       </div>
       <!-- Subtitle controls -->
       <div class="subtitle-bar">
@@ -503,6 +518,30 @@ onUnmounted(() => {
   transition: background 0.2s;
 }
 .player-start:hover { background: #111128; }
+.loading-overlay {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 40px; background: #0a0a1a; border-radius: 8px;
+}
+.loading-spinner {
+  width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { margin-top: 12px; color: var(--text-muted); font-size: 14px; }
+.buffering-bar {
+  position: relative; height: 20px; background: rgba(255,255,255,0.05);
+  border-radius: 4px; overflow: hidden; margin-bottom: 4px;
+}
+.buffer-fill { height: 100%; background: rgba(119,190,65,0.3); transition: width 0.5s; }
+.buffer-text {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  font-size: 11px; color: var(--text-muted);
+}
+.download-bar {
+  height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; margin: 2px 0;
+}
+.download-fill { height: 100%; background: var(--accent); transition: width 1s; border-radius: 2px; }
 .start-icon {
   font-size: 48px;
   margin-bottom: 12px;

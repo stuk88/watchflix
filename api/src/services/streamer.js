@@ -47,11 +47,20 @@ export function getVideoFile(magnet) {
         : torrent.files.reduce((a, b) => a.length > b.length ? a : b);
 
       entry.file = file;
+
+      // Sequential download — critical for streaming playback
+      file.select();
+      // Deselect all other files to avoid wasting bandwidth
+      torrent.files.forEach(f => { if (f !== file) f.deselect(); });
+
       // Collect subtitle files from torrent
       const subExts = ['.srt', '.sub', '.ass', '.ssa', '.vtt'];
       entry.subtitleFiles = torrent.files.filter(f =>
         subExts.some(ext => f.name.toLowerCase().endsWith(ext))
       );
+      // Select subtitle files too
+      entry.subtitleFiles.forEach(f => f.select());
+
       resolve(entry);
       scheduleCleanup(hash);
     });
