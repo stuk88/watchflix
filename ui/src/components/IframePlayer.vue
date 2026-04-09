@@ -14,7 +14,6 @@
         v-else
         ref="hlsVideoEl"
         controls
-        autoplay
         class="player-video"
       ></video>
     </div>
@@ -108,9 +107,10 @@ async function startPlayer() {
         hlsInstance = new Hls();
         hlsInstance.loadSource(data.streamUrl);
         hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => { video.play().catch(() => {}); });
       } else {
-        // Fallback: direct URL (mp4 or native HLS on Safari)
         video.src = data.streamUrl;
+        video.play().catch(() => {});
       }
     } catch (err) {
       extracting.value = false;
