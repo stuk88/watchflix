@@ -5,6 +5,7 @@
       <div class="search-wrap">
         <input
           v-model="searchQuery"
+          @input="debouncedSearch"
           @keyup.enter="doSearch"
           type="text"
           placeholder="Search movies..."
@@ -36,10 +37,16 @@ import { useMoviesStore } from './stores/movies.js';
 const store = useMoviesStore();
 const router = useRouter();
 const searchQuery = ref('');
+let searchTimer = null;
 
 function doSearch() {
   store.filters.search = searchQuery.value;
   store.fetchMovies(1);
   router.push('/');
+}
+
+function debouncedSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(doSearch, 300);
 }
 </script>
