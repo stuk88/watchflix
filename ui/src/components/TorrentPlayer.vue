@@ -16,13 +16,17 @@
         <span class="buffer-text">Buffering {{ progress }}%</span>
       </div>
 
-      <div class="video-wrap">
+      <div class="video-wrap" ref="videoWrap">
         <video
           ref="videoEl"
           class="player-video"
           :src="streamUrl"
           @error="onVideoError"
+          @timeupdate="onTimeUpdate"
         ></video>
+        <div v-if="currentCueText" class="subtitle-overlay">
+          <span class="subtitle-text">{{ currentCueText }}</span>
+        </div>
       </div>
 
       <!-- Download progress bar -->
@@ -164,8 +168,9 @@ const torrentFilename = ref('');
 const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
+const currentCueText = ref('');
+const videoWrap = ref(null);
 let subtitleCues = [];
-let activeTrack = null;
 
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -255,30 +260,19 @@ function parseVTTTime(str) {
 }
 
 function clearSubtitleTrack() {
-  if (activeTrack) {
-    activeTrack.mode = 'disabled';
-    activeTrack = null;
-  }
   subtitleCues = [];
+  currentCueText.value = '';
 }
 
-function applyCuesToTrack() {
-  if (!videoEl.value || !subtitleCues.length) return;
-  // Remove old track
-  if (activeTrack) {
-    activeTrack.mode = 'disabled';
-  }
-  // Create new track
-  const track = videoEl.value.addTextTrack('subtitles', 'Subtitles', 'en');
-  track.mode = 'showing';
-  for (const cue of subtitleCues) {
-    const start = Math.max(0, cue.start - subOffset.value);
-    const end = Math.max(0, cue.end - subOffset.value);
-    if (end > start) {
-      track.addCue(new VTTCue(start, end, cue.text));
-    }
-  }
-  activeTrack = track;
+function onTimeUpdate() {
+  if (!subtitleCues.length) { currentCueText.value = ''; return; }
+  const t = videoEl.value?.currentTime || 0;
+  const cue = subtitleCues.find(c => {
+    const start = c.start - subOffset.value;
+    const end = c.end - subOffset.value;
+    return t >= start && t <= end;
+  });
+  currentCueText.value = cue?.text || '';
 }
 
 function dotSimilarity(a, b) {
@@ -335,7 +329,7 @@ async function selectSubtitleFile(file) {
     const response = await fetch(file.url);
     const vttText = await response.text();
     subtitleCues = parseVTT(vttText);
-    applyCuesToTrack();
+    // cues will render via onTimeUpdate
   } catch (err) {
     console.error('[subtitles] Failed to load VTT:', err);
   }
@@ -359,7 +353,7 @@ function loadLocalSubtitleFile(event) {
     currentSubtitle.value = '_local';
     activeSubUrl.value = 'local://' + file.name;
     subtitleCues = parseVTT(text);
-    applyCuesToTrack();
+    // cues will render via onTimeUpdate
   };
   reader.readAsText(file);
 }
@@ -369,11 +363,7 @@ function adjustOffset(delta) {
 }
 
 
-watch(subOffset, () => {
-  if (subtitleCues.length && activeSubUrl.value) {
-    applyCuesToTrack();
-  }
-});
+// Offset changes take effect immediately via onTimeUpdate
 
 async function autoSync() {
   if (!activeSubUrl.value || syncing.value) return;
@@ -542,6 +532,16 @@ onUnmounted(() => {
   height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; margin: 2px 0;
 }
 .download-fill { height: 100%; background: var(--accent); transition: width 1s; border-radius: 2px; }
+.video-wrap { position: relative; }
+.subtitle-overlay {
+  position: absolute; bottom: 60px; left: 0; right: 0;
+  text-align: center; pointer-events: none; z-index: 10;
+}
+.subtitle-text {
+  background: rgba(0,0,0,0.75); color: #fff; font-size: 20px;
+  padding: 4px 12px; border-radius: 4px; line-height: 1.4;
+  white-space: pre-wrap;
+}
 .start-icon {
   font-size: 48px;
   margin-bottom: 12px;
