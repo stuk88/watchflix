@@ -2,7 +2,7 @@
   <div class="content">
     <FilterBar />
 
-    <div v-if="store.loading" class="loading">Loading movies...</div>
+    <div v-if="store.loading && store.movies.length === 0" class="loading">Loading movies...</div>
 
     <div v-else-if="store.initialized && store.movies.length === 0" class="empty-state">
       <div class="emoji">🎬</div>
@@ -20,11 +20,9 @@
         />
       </div>
 
-      <div class="load-more-bar" ref="loadMoreEl">
-        <div v-if="store.page < store.pages" class="load-more-trigger">
-          {{ store.loadingMore ? 'Loading...' : '' }}
-        </div>
-        <div v-else-if="store.movies.length > 0" class="all-loaded">
+      <div ref="loadMoreEl" class="load-more-bar">
+        <div v-if="store.loadingMore" class="load-more-trigger">Loading...</div>
+        <div v-else-if="store.page >= store.pages && store.movies.length > 0" class="all-loaded">
           ✓ All {{ store.total }} movies loaded
         </div>
       </div>
@@ -33,7 +31,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useMoviesStore } from '../stores/movies.js';
 import MovieCard from '../components/MovieCard.vue';
 import FilterBar from '../components/FilterBar.vue';
@@ -42,22 +40,24 @@ const store = useMoviesStore();
 const loadMoreEl = ref(null);
 let observer = null;
 
-onMounted(() => {
-  if (store.movies.length === 0) store.fetchMovies(1);
-
+function createObserver() {
+  if (observer) observer.disconnect();
   observer = new IntersectionObserver((entries) => {
     if (entries[0].isIntersecting && !store.loadingMore && store.page < store.pages) {
       store.fetchMoreMovies();
     }
-  }, { rootMargin: '200px' });
+  }, { rootMargin: '400px' });
+}
 
-  // Watch for the element to appear
-  const check = setInterval(() => {
-    if (loadMoreEl.value) {
-      observer.observe(loadMoreEl.value);
-      clearInterval(check);
-    }
-  }, 200);
+// Re-observe whenever the ref element changes (appears/disappears with v-else)
+watch(loadMoreEl, (el) => {
+  if (!observer) createObserver();
+  if (el) observer.observe(el);
+});
+
+onMounted(() => {
+  createObserver();
+  if (store.movies.length === 0) store.fetchMovies(1);
 });
 
 onUnmounted(() => {
