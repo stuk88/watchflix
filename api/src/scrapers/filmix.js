@@ -53,50 +53,11 @@ export async function searchFilmix(query) {
   return results;
 }
 
-/**
- * Fetch the detail page of a series and extract season/episode info.
- */
-async function fetchSeriesEpisodes(seriesUrl) {
-  try {
-    const html = await fetchFilmixPage(seriesUrl);
-    const $ = cheerio.load(html);
-    const episodes = [];
-
-    // Filmix typically shows seasons as tabs and episodes as lists
-    const seasonEls = $('.seasons-list li, .player-season-tab, [data-season], .season-item');
-    if (seasonEls.length > 0) {
-      seasonEls.each((_, sEl) => {
-        const seasonNum = parseInt($(sEl).attr('data-season') || $(sEl).attr('data-id') || $(sEl).text().match(/(\d+)/)?.[1]) || 1;
-        const epEls = $(`.episodes-list[data-season="${seasonNum}"] li, .episode-item[data-season="${seasonNum}"], .player-episode-list[data-season="${seasonNum}"] li`);
-        if (epEls.length > 0) {
-          epEls.each((__, eEl) => {
-            const epNum = parseInt($(eEl).attr('data-episode') || $(eEl).attr('data-id') || $(eEl).text().match(/(\d+)/)?.[1]) || 1;
-            const epTitle = $(eEl).text().trim() || null;
-            episodes.push({ season: seasonNum, episode: epNum, episode_title: epTitle });
-          });
-        } else {
-          episodes.push({ season: seasonNum, episode: 1, episode_title: `Season ${seasonNum}` });
-        }
-      });
-    } else {
-      // Try generic episode selectors
-      const epEls = $('.episode, .seria, [data-episode]');
-      epEls.each((_, el) => {
-        const epNum = parseInt($(el).attr('data-episode') || $(el).text().match(/(\d+)/)?.[1]) || 1;
-        const epTitle = $(el).text().trim() || null;
-        episodes.push({ season: 1, episode: epNum, episode_title: epTitle });
-      });
-    }
-
-    return episodes;
-  } catch (err) {
-    console.error(`[filmix] Failed to fetch episodes from ${seriesUrl}:`, err.message);
-    return [];
-  }
-}
+// Filmix's PlayerJS handles seasons/episodes within its own UI.
+// No per-episode scraping needed — single entry per title suffices.
 
 /**
- * Scrape Filmix pages. Series are stored with episode rows grouped by series_imdb_id.
+ * Scrape Filmix pages. Movies and series stored as single entries.
  */
 export async function scrapeFilmix(pages = 3) {
   console.log(`[filmix] Scraping ${pages} pages...`);
@@ -105,11 +66,6 @@ export async function scrapeFilmix(pages = 3) {
   const insertMovieStmt = db.prepare(`
     INSERT OR IGNORE INTO movies (title, year, poster, genre, source, source_url, language, type)
     VALUES (@title, @year, @poster, @genre, @source, @source_url, @language, @type)
-  `);
-
-  const insertEpisodeStmt = db.prepare(`
-    INSERT OR IGNORE INTO movies (title, year, poster, genre, source, source_url, language, type, series_imdb_id, season, episode, episode_title)
-    VALUES (@title, @year, @poster, @genre, @source, @source_url, @language, @type, @series_imdb_id, @season, @episode, @episode_title)
   `);
 
   // Filmix uses different URL patterns for listing vs pagination
@@ -141,7 +97,9 @@ export async function scrapeFilmix(pages = 3) {
           if (!href) return;
           const fullUrl = href.startsWith('http') ? href : `${BASE}${href}`;
 
-          const title = (linkEl.attr('title') || $(el).find('.name, .shortstory-title').text() || linkEl.text() || '').trim();
+          let title = (linkEl.attr('title') || $(el).find('.name, .shortstory-title').text() || linkEl.text() || '').trim();
+          // Clean up " смотреть онлайн" suffix and year from title
+          title = title.replace(/,?\s*\d{4}\s*смотреть онлайн$/i, '').replace(/\s*смотреть онлайн$/i, '').trim();
           const poster = $(el).find('img').attr('src') || $(el).find('img').attr('data-src') || '';
           const fullPoster = poster.startsWith('http') ? poster : (poster ? `${BASE}${poster}` : '');
 
@@ -160,72 +118,24 @@ export async function scrapeFilmix(pages = 3) {
         console.log(`[filmix] ${list} page ${page}: found ${items.length} titles`);
 
         for (const item of items) {
-          if (isSeries) {
-            const seriesId = `filmix:${item.url}`;
+          const existing = db.prepare(
+            'SELECT id FROM movies WHERE source = ? AND source_url = ?'
+          ).get('filmix', item.url);
+          if (existing) continue;
 
-            const existingEp = db.prepare(
-              'SELECT id FROM movies WHERE series_imdb_id = ? LIMIT 1'
-            ).get(seriesId);
-            if (existingEp) continue;
-
-            // Fetch episode list from detail page
-            const episodes = await fetchSeriesEpisodes(item.url);
-
-            if (episodes.length > 0) {
-              for (const ep of episodes) {
-                insertEpisodeStmt.run({
-                  title: item.title,
-                  year: item.year,
-                  poster: item.poster,
-                  genre: item.genre,
-                  source: 'filmix',
-                  source_url: item.url,
-                  language: 'ru',
-                  type: 'series',
-                  series_imdb_id: seriesId,
-                  season: ep.season,
-                  episode: ep.episode,
-                  episode_title: ep.episode_title,
-                });
-                saved++;
-              }
-            } else {
-              insertEpisodeStmt.run({
-                title: item.title,
-                year: item.year,
-                poster: item.poster,
-                genre: item.genre,
-                source: 'filmix',
-                source_url: item.url,
-                language: 'ru',
-                type: 'series',
-                series_imdb_id: seriesId,
-                season: 1,
-                episode: null,
-                episode_title: null,
-              });
-              saved++;
-            }
-
-            await new Promise(r => setTimeout(r, 300));
-          } else {
-            const existing = db.prepare(
-              'SELECT id FROM movies WHERE title = ? AND source = ? AND source_url = ?'
-            ).get(item.title, 'filmix', item.url);
-            if (existing) continue;
-
-            insertMovieStmt.run({
-              title: item.title,
-              year: item.year,
-              poster: item.poster,
-              genre: item.genre,
-              source: 'filmix',
-              source_url: item.url,
-              language: 'ru',
-              type: 'movie',
-            });
-            saved++;
-          }
+          // Filmix's PJS player handles season/episode selection internally,
+          // so we store one entry per title. type is set by category.
+          insertMovieStmt.run({
+            title: item.title,
+            year: item.year,
+            poster: item.poster,
+            genre: item.genre,
+            source: 'filmix',
+            source_url: item.url,
+            language: 'ru',
+            type: isSeries ? 'series' : 'movie',
+          });
+          saved++;
         }
 
         await new Promise(r => setTimeout(r, 300));
