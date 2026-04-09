@@ -636,8 +636,16 @@ router.post('/:id/whisper-sync', async (req, res) => {
 
 router.get('/:id/hdrezka-stream', async (req, res) => {
   try {
+    // Check DB cache first
+    const cached = db.prepare('SELECT cached_stream_url, stream_cached_at, title FROM movies WHERE id = ?').get(req.params.id);
+    if (cached?.cached_stream_url) {
+      return res.json({ streamUrl: cached.cached_stream_url, title: cached.title, cached: true });
+    }
     const { extractHdrezkaStream } = await import('../services/hdrezka-extractor.js');
     const result = await extractHdrezkaStream(req.params.id);
+    // Store in DB
+    db.prepare('UPDATE movies SET cached_stream_url = ?, stream_cached_at = ? WHERE id = ?')
+      .run(result.streamUrl, Date.now(), req.params.id);
     res.json({ streamUrl: result.streamUrl, title: result.title });
   } catch (err) {
     console.error('[hdrezka-stream] Error:', err.message);
@@ -651,8 +659,14 @@ router.get('/:id/hdrezka-stream', async (req, res) => {
 
 router.get('/:id/filmix-stream', async (req, res) => {
   try {
+    const cached = db.prepare('SELECT cached_stream_url, stream_cached_at, title FROM movies WHERE id = ?').get(req.params.id);
+    if (cached?.cached_stream_url) {
+      return res.json({ streamUrl: cached.cached_stream_url, title: cached.title, cached: true });
+    }
     const { extractFilmixStream } = await import('../services/filmix-extractor.js');
     const result = await extractFilmixStream(req.params.id);
+    db.prepare('UPDATE movies SET cached_stream_url = ?, stream_cached_at = ? WHERE id = ?')
+      .run(result.streamUrl, Date.now(), req.params.id);
     res.json({ streamUrl: result.streamUrl, title: result.title });
   } catch (err) {
     console.error('[filmix-stream] Error:', err.message);

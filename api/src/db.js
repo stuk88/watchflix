@@ -79,4 +79,12 @@ try {
   // Column already exists
 }
 
+// Migration: add cached stream URL columns
+try {
+  db.exec(`ALTER TABLE movies ADD COLUMN cached_stream_url TEXT`);
+} catch (e) {}
+try {
+  db.exec(`ALTER TABLE movies ADD COLUMN stream_cached_at INTEGER`);
+} catch (e) {}
+
 export default db;
