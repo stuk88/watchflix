@@ -20,15 +20,10 @@
         />
       </div>
 
-      <div class="load-more-bar">
-        <button
-          v-if="store.page < store.pages"
-          class="btn-load-more"
-          :disabled="store.loadingMore"
-          @click="store.fetchMoreMovies()"
-        >
-          {{ store.loadingMore ? 'Loading...' : 'Load More' }}
-        </button>
+      <div class="load-more-bar" ref="loadMoreEl">
+        <div v-if="store.page < store.pages" class="load-more-trigger">
+          {{ store.loadingMore ? 'Loading...' : '' }}
+        </div>
         <div v-else-if="store.movies.length > 0" class="all-loaded">
           ✓ All {{ store.total }} movies loaded
         </div>
@@ -38,14 +33,34 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { useMoviesStore } from '../stores/movies.js';
 import MovieCard from '../components/MovieCard.vue';
 import FilterBar from '../components/FilterBar.vue';
 
 const store = useMoviesStore();
+const loadMoreEl = ref(null);
+let observer = null;
 
 onMounted(() => {
   if (store.movies.length === 0) store.fetchMovies(1);
+
+  observer = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting && !store.loadingMore && store.page < store.pages) {
+      store.fetchMoreMovies();
+    }
+  }, { rootMargin: '200px' });
+
+  // Watch for the element to appear
+  const check = setInterval(() => {
+    if (loadMoreEl.value) {
+      observer.observe(loadMoreEl.value);
+      clearInterval(check);
+    }
+  }, 200);
+});
+
+onUnmounted(() => {
+  if (observer) observer.disconnect();
 });
 </script>
