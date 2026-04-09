@@ -9,21 +9,10 @@
       <div class="video-wrap">
         <video
           ref="videoEl"
-          controls
-          autoplay
           class="player-video"
           :src="streamUrl"
           @error="onVideoError"
         ></video>
-      </div>
-      <!-- Playback controls -->
-      <div class="playback-controls">
-        <button class="btn btn-playback" @click="skip(-5)" title="Back 5s">⏪ 5s</button>
-        <button class="btn btn-playback" @click="skip(5)" title="Forward 5s">5s ⏩</button>
-        <span class="speed-label">Speed:</span>
-        <button v-for="s in [0.5, 0.75, 1, 1.25, 1.5, 2]" :key="s"
-          class="btn btn-speed" :class="{ active: playbackSpeed === s }"
-          @click="setSpeed(s)">{{ s }}x</button>
       </div>
       <!-- Subtitle controls -->
       <div class="subtitle-bar">
@@ -116,9 +105,11 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted, computed, watch } from 'vue';
+import { ref, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from 'axios';
+import Plyr from 'plyr';
+import 'plyr/dist/plyr.css';
 
 const props = defineProps({
   magnet: String,
@@ -129,6 +120,7 @@ const props = defineProps({
 const router = useRouter();
 const started = ref(false);
 const videoEl = ref(null);
+let plyrInstance = null;
 const downloadSpeed = ref('0 KB/s');
 const uploadSpeed = ref('0 KB/s');
 const peerCount = ref(0);
@@ -157,7 +149,6 @@ const torrentFilename = ref('');
 const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
-const playbackSpeed = ref(1);
 let subtitleCues = [];
 let activeTrack = null;
 
@@ -362,14 +353,6 @@ function adjustOffset(delta) {
   subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
 }
 
-function skip(seconds) {
-  if (videoEl.value) videoEl.value.currentTime += seconds;
-}
-
-function setSpeed(s) {
-  playbackSpeed.value = s;
-  if (videoEl.value) videoEl.value.playbackRate = s;
-}
 
 watch(subOffset, () => {
   if (subtitleCues.length && activeSubUrl.value) {
@@ -416,20 +399,29 @@ async function autoSync() {
   }
 }
 
-function startPlayer() {
+async function startPlayer() {
   if (!props.movieId) return;
   started.value = true;
   status.value = 'loading';
   activeMovieId.value = props.movieId;
   activeStreamUrl.value = `/api/movies/${props.movieId}/stream`;
 
-  fetchSubtitlesForMovie(); // initial fetch by IMDB ID, will upgrade to filename match once torrent metadata arrives
+  fetchSubtitlesForMovie();
   subtitlesFetched = false;
 
-  // Poll stats every 2s
-  statsInterval = setInterval(pollStats, 2000);
+  await nextTick();
 
-  // Check for peers after 15s
+  // Init Plyr on the video element
+  if (videoEl.value && !plyrInstance) {
+    plyrInstance = new Plyr(videoEl.value, {
+      controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'captions', 'settings', 'fullscreen'],
+      settings: ['captions', 'quality', 'speed'],
+      speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+      autoplay: true,
+    });
+  }
+
+  statsInterval = setInterval(pollStats, 2000);
   peerCheckTimer = setTimeout(checkPeers, 15000);
 }
 
@@ -486,6 +478,7 @@ async function removeMovie() {
 }
 
 onUnmounted(() => {
+  if (plyrInstance) { plyrInstance.destroy(); plyrInstance = null; }
   clearSubtitleTrack();
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);

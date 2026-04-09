@@ -7,10 +7,7 @@ const http = require('http');
 
 const isDev = !app.isPackaged;
 
-// Fix grayed-out volume icon in Electron video player
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-app.commandLine.appendSwitch('disable-features', 'AudioServiceSandbox');
-app.commandLine.appendSwitch('no-sandbox');
 
 let mainWindow = null;
 let apiProcess = null;
