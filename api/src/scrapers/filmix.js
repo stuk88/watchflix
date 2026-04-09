@@ -1,10 +1,21 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import iconv from 'iconv-lite';
 import config from '../config.js';
 import db from '../db.js';
 
 const BASE = config.sources.filmix;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// Filmix uses windows-1251 encoding — fetch as buffer and decode
+async function fetchFilmixPage(url) {
+  const { data } = await axios.get(url, {
+    timeout: 15000,
+    headers: { 'User-Agent': UA },
+    responseType: 'arraybuffer',
+  });
+  return iconv.decode(Buffer.from(data), 'win1251');
+}
 
 /**
  * Search Filmix for a query string. Returns array of { title, year, url, poster, type }.
@@ -12,10 +23,7 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 export async function searchFilmix(query) {
   const results = [];
   try {
-    const { data: html } = await axios.get(`${BASE}/search/${encodeURIComponent(query)}`, {
-      timeout: 15000,
-      headers: { 'User-Agent': UA },
-    });
+    const html = await fetchFilmixPage(`${BASE}/search/${encodeURIComponent(query)}`);
 
     const $ = cheerio.load(html);
 
@@ -50,10 +58,7 @@ export async function searchFilmix(query) {
  */
 async function fetchSeriesEpisodes(seriesUrl) {
   try {
-    const { data: html } = await axios.get(seriesUrl, {
-      timeout: 15000,
-      headers: { 'User-Agent': UA },
-    });
+    const html = await fetchFilmixPage(seriesUrl);
     const $ = cheerio.load(html);
     const episodes = [];
 
@@ -117,21 +122,23 @@ export async function scrapeFilmix(pages = 3) {
     for (let page = 1; page <= pages; page++) {
       try {
         const url = page === 1 ? `${BASE}${list}` : `${BASE}${paged}${page}/`;
-        const { data: html } = await axios.get(url, {
-          timeout: 15000,
-          headers: { 'User-Agent': UA },
-        });
+        const html = await fetchFilmixPage(url);
 
         const $ = cheerio.load(html);
         const items = [];
 
-        $('.poster-tooltip, .shortstory, .film-poster').each((_, el) => {
-          const linkEl = $(el).is('a') ? $(el) : $(el).closest('a[href]').length ? $(el).closest('a[href]') : $(el).find('a[href]').first();
+        $('.shortstory, .poster-tooltip, .film-poster').each((_, el) => {
+          // Find the movie page link (class "watch" or link with numeric ID in path)
+          let linkEl = $(el).find('a.watch, a[href*="/film/"][href*="-v-"], a[href*="/seria/"][href*="-v-"]').first();
+          if (!linkEl.length) {
+            linkEl = $(el).find('a[href]').filter((__, a) => {
+              const h = $(a).attr('href') || '';
+              return /\/\d+/.test(h) && !/thumbs|posters|\.(jpg|png|gif)/i.test(h);
+            }).first();
+          }
+          if (!linkEl.length) return;
           const href = linkEl.attr('href') || '';
-          // Only accept actual movie/series page links (not posters, images, categories)
-          if (!href || !/\/\d+/.test(href)) return;
-          if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(href)) return;
-          if (/thumbs\.|posters\//i.test(href)) return;
+          if (!href) return;
           const fullUrl = href.startsWith('http') ? href : `${BASE}${href}`;
 
           const title = (linkEl.attr('title') || $(el).find('.name, .shortstory-title').text() || linkEl.text() || '').trim();
