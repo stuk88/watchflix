@@ -265,15 +265,23 @@ function clearSubtitleTrack() {
   }
 }
 
-function generateVTT(cues, offset) {
+const RTL_LANGS = new Set(['he', 'ar', 'fa', 'ur', 'yi', 'heb', 'ara', 'per', 'urd']);
+
+function isRTL(lang) {
+  return RTL_LANGS.has(lang?.toLowerCase());
+}
+
+function generateVTT(cues, offset, lang) {
+  const rtl = isRTL(lang);
   const lines = ['WEBVTT', ''];
+  if (rtl) lines.push('STYLE', '::cue { direction: rtl; unicode-bidi: bidi-override; text-align: right; }', '');
+  const fmt = t => {
+    const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), sec = t%60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${sec.toFixed(3).padStart(6,'0')}`;
+  };
   for (const cue of cues) {
     const s = Math.max(0, cue.start - offset);
     const e = Math.max(0, cue.end - offset);
-    const fmt = t => {
-      const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), sec = t%60;
-      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${sec.toFixed(3).padStart(6,'0')}`;
-    };
     lines.push(`${fmt(s)} --> ${fmt(e)}`, cue.text, '');
   }
   return lines.join('\n');
@@ -288,12 +296,15 @@ function setTrackFromCues() {
   }
   if (activeBlobUrl) URL.revokeObjectURL(activeBlobUrl);
 
-  const vtt = generateVTT(subtitleCues, subOffset.value);
+  const track = subtitleTracks.value.find(t => t.language === currentSubtitle.value);
+  const lang = track?.language || currentSubtitle.value || 'en';
+  const label = track?.label || 'Subtitles';
+
+  const vtt = generateVTT(subtitleCues, subOffset.value, lang);
   const blob = new Blob([vtt], { type: 'text/vtt' });
   activeBlobUrl = URL.createObjectURL(blob);
 
-  const label = subtitleTracks.value.find(t => t.language === currentSubtitle.value)?.label || 'Subtitles';
-  vjsPlayer.addRemoteTextTrack({ kind: 'subtitles', src: activeBlobUrl, srclang: 'en', label, default: true }, false);
+  vjsPlayer.addRemoteTextTrack({ kind: 'subtitles', src: activeBlobUrl, srclang: lang, label, default: true }, false);
 
   // Force showing
   setTimeout(() => {
