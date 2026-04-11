@@ -19,16 +19,9 @@
       <div class="video-wrap">
         <video
           ref="videoEl"
-          class="player-video"
-          :src="streamUrl"
-          @error="onVideoError"
-          @timeupdate="onTimeUpdate"
-          @seeked="onTimeUpdate"
-          @playing="onTimeUpdate"
+          class="video-js vjs-big-play-centered vjs-fluid"
+          crossorigin="anonymous"
         ></video>
-        <div v-if="currentCueText" class="subtitle-overlay">
-          <span class="subtitle-text" v-html="currentCueText"></span>
-        </div>
       </div>
 
       <!-- Download progress bar -->
@@ -129,8 +122,8 @@
 import { ref, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from 'axios';
-import Plyr from 'plyr';
-import 'plyr/dist/plyr.css';
+import videojs from 'video.js';
+import 'video.js/dist/video-js.css';
 
 const props = defineProps({
   magnet: String,
@@ -141,7 +134,7 @@ const props = defineProps({
 const router = useRouter();
 const started = ref(false);
 const videoEl = ref(null);
-let plyrInstance = null;
+let vjsPlayer = null;
 const downloadSpeed = ref('0 KB/s');
 const uploadSpeed = ref('0 KB/s');
 const peerCount = ref(0);
@@ -170,8 +163,8 @@ const torrentFilename = ref('');
 const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
-const currentCueText = ref('');
 let subtitleCues = [];
+let activeBlobUrl = null;
 
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -262,15 +255,53 @@ function parseVTTTime(str) {
 
 function clearSubtitleTrack() {
   subtitleCues = [];
-  currentCueText.value = '';
+  if (activeBlobUrl) { URL.revokeObjectURL(activeBlobUrl); activeBlobUrl = null; }
+  // Remove all text tracks from Video.js
+  if (vjsPlayer) {
+    const tracks = vjsPlayer.remoteTextTracks();
+    for (let i = tracks.length - 1; i >= 0; i--) {
+      vjsPlayer.removeRemoteTextTrack(tracks[i]);
+    }
+  }
 }
 
-function onTimeUpdate() {
-  if (!subtitleCues.length) { currentCueText.value = ''; return; }
-  const t = videoEl.value?.currentTime || 0;
-  const offset = subOffset.value;
-  const cue = subtitleCues.find(c => t >= (c.start - offset) && t <= (c.end - offset));
-  currentCueText.value = cue ? cue.text.replace(/\n/g, '<br>') : '';
+function generateVTT(cues, offset) {
+  const lines = ['WEBVTT', ''];
+  for (const cue of cues) {
+    const s = Math.max(0, cue.start - offset);
+    const e = Math.max(0, cue.end - offset);
+    const fmt = t => {
+      const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), sec = t%60;
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${sec.toFixed(3).padStart(6,'0')}`;
+    };
+    lines.push(`${fmt(s)} --> ${fmt(e)}`, cue.text, '');
+  }
+  return lines.join('\n');
+}
+
+function setTrackFromCues() {
+  if (!vjsPlayer || !subtitleCues.length) return;
+  // Remove old tracks
+  const tracks = vjsPlayer.remoteTextTracks();
+  for (let i = tracks.length - 1; i >= 0; i--) {
+    vjsPlayer.removeRemoteTextTrack(tracks[i]);
+  }
+  if (activeBlobUrl) URL.revokeObjectURL(activeBlobUrl);
+
+  const vtt = generateVTT(subtitleCues, subOffset.value);
+  const blob = new Blob([vtt], { type: 'text/vtt' });
+  activeBlobUrl = URL.createObjectURL(blob);
+
+  const label = subtitleTracks.value.find(t => t.language === currentSubtitle.value)?.label || 'Subtitles';
+  vjsPlayer.addRemoteTextTrack({ kind: 'subtitles', src: activeBlobUrl, srclang: 'en', label, default: true }, false);
+
+  // Force showing
+  setTimeout(() => {
+    const tt = vjsPlayer.textTracks();
+    for (let i = 0; i < tt.length; i++) {
+      if (tt[i].kind === 'subtitles') tt[i].mode = 'showing';
+    }
+  }, 300);
 }
 
 function dotSimilarity(a, b) {
@@ -327,7 +358,7 @@ async function selectSubtitleFile(file) {
     const response = await fetch(file.url);
     const vttText = await response.text();
     subtitleCues = parseVTT(vttText);
-    // Cues render via onTimeUpdate overlay
+    setTrackFromCues();
   } catch (err) {
     console.error('[subtitles] Failed to load VTT:', err);
   }
@@ -350,7 +381,7 @@ function loadLocalSubtitleFile(event) {
     currentSubtitle.value = '_local';
     activeSubUrl.value = 'local://' + file.name;
     subtitleCues = parseVTT(text);
-    // Cues render via onTimeUpdate overlay
+    setTrackFromCues();
   };
   reader.readAsText(file);
 }
@@ -360,7 +391,7 @@ function adjustOffset(delta) {
 }
 
 
-// Offset changes render immediately via onTimeUpdate
+watch(subOffset, () => { if (subtitleCues.length) setTrackFromCues(); });
 
 async function autoSync() {
   if (!activeSubUrl.value || syncing.value) return;
@@ -413,14 +444,21 @@ async function startPlayer() {
 
   await nextTick();
 
-  // Init Plyr on the video element
-  if (videoEl.value && !plyrInstance) {
-    plyrInstance = new Plyr(videoEl.value, {
-      controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'captions', 'settings', 'fullscreen'],
-      settings: ['captions', 'quality', 'speed'],
-      speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+  // Init Video.js player
+  if (videoEl.value && !vjsPlayer) {
+    vjsPlayer = videojs(videoEl.value, {
+      controls: true,
       autoplay: true,
+      preload: 'auto',
+      fluid: true,
+      playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
+      controlBar: {
+        subtitlesButton: true,
+        captionsButton: true,
+      },
+      sources: [{ src: activeStreamUrl.value, type: 'video/mp4' }],
     });
+    vjsPlayer.on('error', () => onVideoError());
   }
 
   statsInterval = setInterval(pollStats, 2000);
@@ -480,7 +518,8 @@ async function removeMovie() {
 }
 
 onUnmounted(() => {
-  if (plyrInstance) { plyrInstance.destroy(); plyrInstance = null; }
+  if (vjsPlayer) { vjsPlayer.dispose(); vjsPlayer = null; }
+  if (activeBlobUrl) URL.revokeObjectURL(activeBlobUrl);
   clearSubtitleTrack();
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
@@ -529,18 +568,6 @@ onUnmounted(() => {
   height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; margin: 2px 0;
 }
 .download-fill { height: 100%; background: var(--accent); transition: width 1s; border-radius: 2px; }
-.video-wrap { position: relative; }
-.subtitle-overlay {
-  position: absolute; bottom: 80px; left: 0; right: 0;
-  text-align: center; pointer-events: none; z-index: 20;
-}
-.subtitle-text {
-  display: inline-block;
-  background: rgba(0,0,0,0.85); color: #fff; font-size: 22px;
-  padding: 6px 16px; border-radius: 4px; line-height: 1.5;
-  max-width: 80%; font-family: sans-serif;
-  text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
-}
 .start-icon {
   font-size: 48px;
   margin-bottom: 12px;
