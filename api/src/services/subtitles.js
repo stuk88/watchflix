@@ -169,6 +169,21 @@ export async function fetchAndConvertSubtitle(url) {
   let buffer = Buffer.from(response.data);
 
   const contentType = response.headers['content-type'] || '';
+
+  // Handle ZIP files (Wizdom returns .zip containing .srt)
+  const isZip = buffer[0] === 0x50 && buffer[1] === 0x4b;
+  if (isZip) {
+    const { default: AdmZip } = await import('adm-zip');
+    const zip = new AdmZip(buffer);
+    const entries = zip.getEntries();
+    const srtEntry = entries.find(e => e.entryName.endsWith('.srt') || e.entryName.endsWith('.vtt'));
+    if (srtEntry) {
+      buffer = srtEntry.getData();
+    } else if (entries.length > 0) {
+      buffer = entries[0].getData();
+    }
+  }
+
   const isGzip = url.endsWith('.gz') || contentType.includes('gzip')
     || (buffer[0] === 0x1f && buffer[1] === 0x8b);
   if (isGzip) {
