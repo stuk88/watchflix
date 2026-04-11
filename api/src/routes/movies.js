@@ -316,6 +316,13 @@ router.get('/:id/stream', async (req, res) => {
     const mimeTypes = { mp4: 'video/mp4', mkv: 'video/x-matroska', avi: 'video/x-msvideo', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4' };
     const contentType = mimeTypes[ext] || 'video/mp4';
 
+    // CORS headers so <video crossorigin="anonymous"> + <track> elements work
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range',
+      'Access-Control-Expose-Headers': 'Content-Range, Content-Length',
+    };
+
     const range = req.headers.range;
     if (range) {
       const parts = range.replace(/bytes=/, '').split('-');
@@ -324,6 +331,7 @@ router.get('/:id/stream', async (req, res) => {
       const chunkSize = end - start + 1;
 
       res.writeHead(206, {
+        ...corsHeaders,
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
@@ -335,6 +343,7 @@ router.get('/:id/stream', async (req, res) => {
       stream.on('error', () => res.end());
     } else {
       res.writeHead(200, {
+        ...corsHeaders,
         'Content-Length': fileSize,
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',

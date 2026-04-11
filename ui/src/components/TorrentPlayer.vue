@@ -16,17 +16,24 @@
         <span class="buffer-text">Buffering {{ progress }}%</span>
       </div>
 
-      <div class="video-wrap" ref="videoWrap">
+      <div class="video-wrap">
         <video
           ref="videoEl"
+          crossorigin="anonymous"
           class="player-video"
           :src="streamUrl"
           @error="onVideoError"
-          @timeupdate="onTimeUpdate"
-        ></video>
-        <div v-if="currentCueText" class="subtitle-overlay">
-          <span class="subtitle-text">{{ currentCueText }}</span>
-        </div>
+        >
+          <track
+            v-for="(track, i) in activeTracks"
+            :key="i"
+            :src="track.src"
+            :kind="track.kind"
+            :label="track.label"
+            :srclang="track.srclang"
+            :default="i === 0"
+          />
+        </video>
       </div>
 
       <!-- Download progress bar -->
@@ -168,9 +175,9 @@ const torrentFilename = ref('');
 const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
-const currentCueText = ref('');
-const videoWrap = ref(null);
+const activeTracks = ref([]);
 let subtitleCues = [];
+let blobUrls = [];
 
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -261,18 +268,42 @@ function parseVTTTime(str) {
 
 function clearSubtitleTrack() {
   subtitleCues = [];
-  currentCueText.value = '';
+  activeTracks.value = [];
+  blobUrls.forEach(u => URL.revokeObjectURL(u));
+  blobUrls = [];
 }
 
-function onTimeUpdate() {
-  if (!subtitleCues.length) { currentCueText.value = ''; return; }
-  const t = videoEl.value?.currentTime || 0;
-  const cue = subtitleCues.find(c => {
-    const start = c.start - subOffset.value;
-    const end = c.end - subOffset.value;
-    return t >= start && t <= end;
-  });
-  currentCueText.value = cue?.text || '';
+function generateVTT(cues, offset) {
+  const lines = ['WEBVTT', ''];
+  for (const cue of cues) {
+    const s = Math.max(0, cue.start - offset);
+    const e = Math.max(0, cue.end - offset);
+    const fmt = t => {
+      const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), sec = t%60;
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${sec.toFixed(3).padStart(6,'0')}`;
+    };
+    lines.push(`${fmt(s)} --> ${fmt(e)}`, cue.text, '');
+  }
+  return lines.join('\n');
+}
+
+function setTrackFromCues() {
+  blobUrls.forEach(u => URL.revokeObjectURL(u));
+  blobUrls = [];
+  if (!subtitleCues.length) { activeTracks.value = []; return; }
+  const vtt = generateVTT(subtitleCues, subOffset.value);
+  const blob = new Blob([vtt], { type: 'text/vtt' });
+  const url = URL.createObjectURL(blob);
+  blobUrls.push(url);
+  const label = subtitleTracks.value.find(t => t.language === currentSubtitle.value)?.label || 'Subtitles';
+  activeTracks.value = [{ src: url, kind: 'subtitles', label, srclang: 'en' }];
+  // Tell Plyr to show the track
+  if (plyrInstance) {
+    setTimeout(() => {
+      const video = videoEl.value;
+      if (video?.textTracks?.[0]) video.textTracks[0].mode = 'showing';
+    }, 200);
+  }
 }
 
 function dotSimilarity(a, b) {
@@ -329,7 +360,7 @@ async function selectSubtitleFile(file) {
     const response = await fetch(file.url);
     const vttText = await response.text();
     subtitleCues = parseVTT(vttText);
-    // cues will render via onTimeUpdate
+    setTrackFromCues();
   } catch (err) {
     console.error('[subtitles] Failed to load VTT:', err);
   }
@@ -341,7 +372,6 @@ function loadLocalSubtitleFile(event) {
   const reader = new FileReader();
   reader.onload = () => {
     let text = reader.result;
-    // Convert SRT to VTT if needed
     if (file.name.endsWith('.srt')) {
       text = 'WEBVTT\n\n' + text
         .replace(/\r\n/g, '\n')
@@ -353,7 +383,7 @@ function loadLocalSubtitleFile(event) {
     currentSubtitle.value = '_local';
     activeSubUrl.value = 'local://' + file.name;
     subtitleCues = parseVTT(text);
-    // cues will render via onTimeUpdate
+    setTrackFromCues();
   };
   reader.readAsText(file);
 }
@@ -363,7 +393,7 @@ function adjustOffset(delta) {
 }
 
 
-// Offset changes take effect immediately via onTimeUpdate
+watch(subOffset, () => { if (subtitleCues.length) setTrackFromCues(); });
 
 async function autoSync() {
   if (!activeSubUrl.value || syncing.value) return;
@@ -484,6 +514,7 @@ async function removeMovie() {
 
 onUnmounted(() => {
   if (plyrInstance) { plyrInstance.destroy(); plyrInstance = null; }
+  blobUrls.forEach(u => URL.revokeObjectURL(u));
   clearSubtitleTrack();
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
@@ -532,16 +563,6 @@ onUnmounted(() => {
   height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; margin: 2px 0;
 }
 .download-fill { height: 100%; background: var(--accent); transition: width 1s; border-radius: 2px; }
-.video-wrap { position: relative; }
-.subtitle-overlay {
-  position: absolute; bottom: 60px; left: 0; right: 0;
-  text-align: center; pointer-events: none; z-index: 10;
-}
-.subtitle-text {
-  background: rgba(0,0,0,0.75); color: #fff; font-size: 20px;
-  padding: 4px 12px; border-radius: 4px; line-height: 1.4;
-  white-space: pre-wrap;
-}
 .start-icon {
   font-size: 48px;
   margin-bottom: 12px;
