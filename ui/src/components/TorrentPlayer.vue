@@ -23,17 +23,7 @@
           class="player-video"
           :src="streamUrl"
           @error="onVideoError"
-        >
-          <track
-            v-for="(track, i) in activeTracks"
-            :key="i"
-            :src="track.src"
-            :kind="track.kind"
-            :label="track.label"
-            :srclang="track.srclang"
-            :default="i === 0"
-          />
-        </video>
+        ></video>
       </div>
 
       <!-- Download progress bar -->
@@ -287,23 +277,50 @@ function generateVTT(cues, offset) {
   return lines.join('\n');
 }
 
-function setTrackFromCues() {
+async function setTrackFromCues() {
   blobUrls.forEach(u => URL.revokeObjectURL(u));
   blobUrls = [];
   if (!subtitleCues.length) { activeTracks.value = []; return; }
+
   const vtt = generateVTT(subtitleCues, subOffset.value);
   const blob = new Blob([vtt], { type: 'text/vtt' });
   const url = URL.createObjectURL(blob);
   blobUrls.push(url);
   const label = subtitleTracks.value.find(t => t.language === currentSubtitle.value)?.label || 'Subtitles';
-  activeTracks.value = [{ src: url, kind: 'subtitles', label, srclang: 'en' }];
-  // Tell Plyr to show the track
-  if (plyrInstance) {
-    setTimeout(() => {
-      const video = videoEl.value;
-      if (video?.textTracks?.[0]) video.textTracks[0].mode = 'showing';
-    }, 200);
-  }
+
+  // Remove existing track elements, add new one
+  const video = videoEl.value;
+  if (!video) return;
+
+  // Remove old tracks
+  const oldTracks = video.querySelectorAll('track');
+  oldTracks.forEach(t => t.remove());
+
+  // Add new track element directly to the video DOM
+  const trackEl = document.createElement('track');
+  trackEl.kind = 'subtitles';
+  trackEl.label = label;
+  trackEl.srclang = 'en';
+  trackEl.src = url;
+  trackEl.default = true;
+  video.appendChild(trackEl);
+
+  // Wait for track to load, then force showing
+  trackEl.addEventListener('load', () => {
+    if (video.textTracks[0]) video.textTracks[0].mode = 'showing';
+  });
+
+  // Also force via timeout as fallback
+  setTimeout(() => {
+    for (let i = 0; i < video.textTracks.length; i++) {
+      video.textTracks[i].mode = 'showing';
+    }
+    // Toggle Plyr captions
+    if (plyrInstance) {
+      plyrInstance.captions.active = true;
+      plyrInstance.captions.currentTrack = 0;
+    }
+  }, 500);
 }
 
 function dotSimilarity(a, b) {
@@ -563,6 +580,12 @@ onUnmounted(() => {
   height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; margin: 2px 0;
 }
 .download-fill { height: 100%; background: var(--accent); transition: width 1s; border-radius: 2px; }
+video::cue {
+  background: rgba(0,0,0,0.8);
+  color: #fff;
+  font-size: 22px;
+  font-family: sans-serif;
+}
 .start-icon {
   font-size: 48px;
   margin-bottom: 12px;
