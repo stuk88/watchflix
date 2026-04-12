@@ -20,7 +20,6 @@
         <video
           ref="videoEl"
           class="video-js vjs-big-play-centered vjs-fluid"
-          crossorigin="anonymous"
         ></video>
       </div>
 
@@ -28,44 +27,7 @@
       <div class="download-bar">
         <div class="download-fill" :style="{ width: progress + '%' }"></div>
       </div>
-      <!-- Subtitle controls -->
-      <div class="subtitle-bar">
-        <span class="subtitle-label">CC:</span>
-        <button class="btn btn-sub" :class="{ active: currentSubtitle === null && !showSubPicker }" @click="selectSubtitleFile(null); showSubPicker = false;">Off</button>
-        <button
-          v-for="track in subtitleTracks"
-          :key="track.language"
-          class="btn btn-sub"
-          :class="{ active: currentSubtitle === track.language }"
-          @click="toggleLangPicker(track.language)"
-        >{{ track.label }} <span v-if="track.files.length > 1" class="file-count">({{ track.files.length }})</span></button>
-        <label class="btn btn-sub btn-local-file">
-          📂 Local File
-          <input type="file" accept=".srt,.vtt,.sub,.ass" style="display:none" @change="loadLocalSubtitleFile" />
-        </label>
-      </div>
-      <!-- Subtitle file picker (when language has multiple files) -->
-      <div v-if="showSubPicker && pickerFiles.length" class="sub-picker">
-        <div class="sub-picker-header">
-          <span>Choose subtitle file:</span>
-          <button class="btn btn-sub btn-close-picker" @click="showSubPicker = false">✕</button>
-        </div>
-        <button
-          v-for="(file, i) in pickerFiles"
-          :key="i"
-          class="btn btn-sub-file"
-          :class="{ active: activeSubUrl === file.url }"
-          @click="selectSubtitleFile(file)"
-        >
-          <span class="sub-filename">
-            {{ file.filename }}
-            <span v-if="file.isBestMatch" class="best-match-badge">★ Best match</span>
-          </span>
-          <span v-if="file.downloads >= 0" class="sub-downloads">{{ file.downloads.toLocaleString() }} downloads</span>
-          <span v-else class="sub-downloads">📦 from torrent</span>
-        </button>
-      </div>
-      <!-- Subtitle sync controls -->
+      <!-- Subtitle sync controls (shown when a track is active) -->
       <div v-if="activeSubUrl" class="sync-bar">
         <button class="btn btn-sync btn-auto-sync" @click="autoSync" :disabled="syncing">
           {{ syncing ? '⏳ Syncing...' : '🔄 Auto Sync' }}
@@ -155,16 +117,11 @@ let torrentSubsAdded = false;
 const streamUrl = computed(() => activeStreamUrl.value);
 
 const subtitleTracks = ref([]);
-const currentSubtitle = ref(null);
-const showSubPicker = ref(false);
-const pickerFiles = ref([]);
 const activeSubUrl = ref(null);
 const torrentFilename = ref('');
 const subOffset = ref(0);
 const syncing = ref(false);
 const syncStatus = ref('');
-let subtitleCues = [];
-let activeBlobUrl = null;
 
 function formatSpeed(bytes) {
   if (bytes < 1024) return `${bytes} B/s`;
@@ -208,61 +165,108 @@ async function fetchSubtitlesForMovie(filename) {
     const params = filename ? `?filename=${encodeURIComponent(filename)}` : '';
     const { data } = await axios.get(`/api/movies/${props.movieId}/subtitles${params}`);
     subtitleTracks.value = data.tracks || [];
+    addAllTracksToPlayer();
   } catch (err) {
     console.error('[torrent-player] Subtitle fetch error:', err.message);
   }
 }
 
 function addTorrentSubtitleFiles(subFiles) {
-  // Parse language from filename, e.g. "Movie.en.srt" or "Subs/English.srt"
   const torrentGroup = {
     language: '_torrent',
-    label: '📦 Torrent',
-    files: subFiles.map(f => {
-      // Try to extract lang hint from filename
-      const name = f.name.split('/').pop();
-      return {
-        filename: name,
-        url: `/api/movies/${props.movieId}/torrent-subtitle/${f.index}`,
-        downloads: -1, // marker for torrent files
-      };
-    }),
+    label: 'Torrent',
+    files: subFiles.map(f => ({
+      filename: f.name.split('/').pop(),
+      url: `/api/movies/${props.movieId}/torrent-subtitle/${f.index}`,
+      downloads: -1,
+    })),
   };
-  // Prepend torrent subs so they appear first
   subtitleTracks.value = [torrentGroup, ...subtitleTracks.value];
+  addAllTracksToPlayer();
 }
 
-function parseVTT(vttText) {
-  const cues = [];
-  const blocks = vttText.split(/\n{2,}/);
-  for (const block of blocks) {
-    const lines = block.trim().split('\n');
-    const tsIdx = lines.findIndex(l => l.includes('-->'));
-    if (tsIdx === -1) continue;
-    const [startStr, endStr] = lines[tsIdx].split('-->').map(s => s.trim());
-    const text = lines.slice(tsIdx + 1).join('\n').replace(/<[^>]+>/g, '').trim();
-    if (!text) continue;
-    cues.push({ start: parseVTTTime(startStr), end: parseVTTTime(endStr), text });
-  }
-  return cues;
-}
+function addAllTracksToPlayer() {
+  if (!vjsPlayer || addAllTracksToPlayer._done) return;
+  addAllTracksToPlayer._done = true;
 
-function parseVTTTime(str) {
-  const parts = str.replace(',', '.').split(':');
-  if (parts.length === 3) return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
-  return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
-}
+  // Wait for player ready
+  vjsPlayer.ready(() => {
+    // Add each subtitle as a Video.js text track with lazy-loaded cues
+    // Only add one track per language (best file), to keep the CC menu manageable
+    for (const group of subtitleTracks.value) {
+      const bestFile = group.files[0]; // first file is usually best
+      const label = group.label || group.language;
+      const lang = group.language || 'en';
 
-function clearSubtitleTrack() {
-  subtitleCues = [];
-  if (activeBlobUrl) { URL.revokeObjectURL(activeBlobUrl); activeBlobUrl = null; }
-  // Remove all text tracks from Video.js
-  if (vjsPlayer) {
-    const tracks = vjsPlayer.remoteTextTracks();
-    for (let i = tracks.length - 1; i >= 0; i--) {
-      vjsPlayer.removeRemoteTextTrack(tracks[i]);
+      const track = vjsPlayer.addTextTrack('subtitles', label, lang);
+
+      // Lazy-load cues when track is shown
+      const origMode = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(track), 'mode') ||
+                        Object.getOwnPropertyDescriptor(track.__proto__.__proto__, 'mode');
+
+      let loaded = false;
+      track.addEventListener('cuechange', () => {}); // keep alive
+
+      // Monitor mode changes to load cues on demand
+      const checkAndLoad = async () => {
+        if (track.mode === 'showing' && !loaded) {
+          loaded = true;
+          try {
+            const resp = await fetch(bestFile.url);
+            const vtt = await resp.text();
+            const blocks = vtt.split(/\n{2,}/);
+            for (const block of blocks) {
+              const lines = block.trim().split('\n');
+              const tsIdx = lines.findIndex(l => l.includes('-->'));
+              if (tsIdx === -1) continue;
+              const [startStr, endStr] = lines[tsIdx].split('-->').map(s => s.trim());
+              const text = lines.slice(tsIdx + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+              if (!text) continue;
+              const parseT = s => {
+                const p = s.replace(',','.').split(':');
+                return p.length === 3 ? parseInt(p[0])*3600+parseInt(p[1])*60+parseFloat(p[2]) : parseInt(p[0])*60+parseFloat(p[1]);
+              };
+              track.addCue(new VTTCue(parseT(startStr), parseT(endStr), text));
+            }
+            console.log('[subs] Loaded', track.cues.length, 'cues for', label);
+
+            // Apply RTL
+            if (isRTL(lang)) {
+              const display = vjsPlayer.el().querySelector('.vjs-text-track-display');
+              if (display) { display.style.direction = 'rtl'; display.style.unicodeBidi = 'bidi-override'; }
+            }
+          } catch (err) {
+            console.error('[subs] Failed to load', label, err);
+          }
+        }
+      };
+
+      // Poll for mode change since Video.js CC menu changes mode
+      const interval = setInterval(() => {
+        if (!vjsPlayer) { clearInterval(interval); return; }
+        checkAndLoad();
+      }, 500);
     }
-  }
+    console.log('[subs] Registered', subtitleTracks.value.length, 'language tracks');
+  });
+
+  // Listen for track changes to apply RTL and track active state
+  const tt = vjsPlayer.textTracks();
+  tt.addEventListener('change', () => {
+    const display = vjsPlayer.el().querySelector('.vjs-text-track-display');
+    let activeLang = null;
+    for (let i = 0; i < tt.length; i++) {
+      if (tt[i].mode === 'showing') { activeLang = tt[i].language; break; }
+    }
+    if (display && isRTL(activeLang)) {
+      display.style.direction = 'rtl';
+      display.style.unicodeBidi = 'bidi-override';
+    } else if (display) {
+      display.style.direction = '';
+      display.style.unicodeBidi = '';
+    }
+    activeSubUrl.value = activeLang ? 'active' : null;
+  });
 }
 
 const RTL_LANGS = new Set(['he', 'ar', 'fa', 'ur', 'yi', 'heb', 'ara', 'per', 'urd']);
@@ -271,176 +275,22 @@ function isRTL(lang) {
   return RTL_LANGS.has(lang?.toLowerCase());
 }
 
-function generateVTT(cues, offset, lang) {
-  const rtl = isRTL(lang);
-  const lines = ['WEBVTT', ''];
-  if (rtl) lines.push('STYLE', '::cue { direction: rtl; unicode-bidi: bidi-override; text-align: right; }', '');
-  const fmt = t => {
-    const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), sec = t%60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${sec.toFixed(3).padStart(6,'0')}`;
-  };
-  for (const cue of cues) {
-    const s = Math.max(0, cue.start - offset);
-    const e = Math.max(0, cue.end - offset);
-    lines.push(`${fmt(s)} --> ${fmt(e)}`, cue.text, '');
-  }
-  return lines.join('\n');
-}
-
-function setTrackFromCues() {
-  if (!vjsPlayer || !subtitleCues.length) return;
-  // Remove old tracks
-  const tracks = vjsPlayer.remoteTextTracks();
-  for (let i = tracks.length - 1; i >= 0; i--) {
-    vjsPlayer.removeRemoteTextTrack(tracks[i]);
-  }
-  if (activeBlobUrl) URL.revokeObjectURL(activeBlobUrl);
-
-  const track = subtitleTracks.value.find(t => t.language === currentSubtitle.value);
-  const lang = track?.language || currentSubtitle.value || 'en';
-  const label = track?.label || 'Subtitles';
-
-  const vtt = generateVTT(subtitleCues, subOffset.value, lang);
-  const blob = new Blob([vtt], { type: 'text/vtt' });
-  activeBlobUrl = URL.createObjectURL(blob);
-
-  vjsPlayer.addRemoteTextTrack({ kind: 'subtitles', src: activeBlobUrl, srclang: lang, label, default: true }, false);
-
-  // Force showing
-  setTimeout(() => {
-    const tt = vjsPlayer.textTracks();
-    for (let i = 0; i < tt.length; i++) {
-      if (tt[i].kind === 'subtitles') tt[i].mode = 'showing';
-    }
-  }, 300);
-}
-
-function dotSimilarity(a, b) {
-  if (!a || !b) return 0;
-  const partsA = a.toLowerCase().replace(/\.[^.]+$/, '').split('.');
-  const partsB = b.toLowerCase().replace(/\.[^.]+$/, '').split('.');
-  const setB = new Set(partsB);
-  return partsA.filter(p => p.length > 1 && setB.has(p)).length;
-}
-
-function markBestMatch(files, referenceFilename) {
-  if (!referenceFilename || files.length <= 1) return files;
-  const scores = files.map(f => dotSimilarity(f.filename, referenceFilename));
-  const maxScore = Math.max(...scores);
-  if (maxScore === 0) return files;
-  const bestIdx = scores.indexOf(maxScore);
-  return files.map((f, i) => ({ ...f, isBestMatch: i === bestIdx }));
-}
-
-function toggleLangPicker(lang) {
-  const track = subtitleTracks.value.find(t => t.language === lang);
-  if (!track) return;
-
-  if (track.files.length === 1) {
-    // Single file — select immediately
-    currentSubtitle.value = lang;
-    showSubPicker.value = false;
-    selectSubtitleFile(track.files[0]);
-    return;
-  }
-
-  // Multiple files — show picker, mark best match by filename similarity
-  currentSubtitle.value = lang;
-  pickerFiles.value = markBestMatch(track.files, torrentFilename.value);
-  showSubPicker.value = true;
-}
-
-async function selectSubtitleFile(file) {
-  clearSubtitleTrack();
-  subOffset.value = 0;
-
-  if (!file) {
-    currentSubtitle.value = null;
-    activeSubUrl.value = null;
-    showSubPicker.value = false;
-    return;
-  }
-
-  activeSubUrl.value = file.url;
-  showSubPicker.value = false;
-
-  try {
-    // file.url can be a network URL or a local blob URL
-    const response = await fetch(file.url);
-    const vttText = await response.text();
-    subtitleCues = parseVTT(vttText);
-    setTrackFromCues();
-  } catch (err) {
-    console.error('[subtitles] Failed to load VTT:', err);
-  }
-}
-
-function loadLocalSubtitleFile(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    let text = reader.result;
-    if (file.name.endsWith('.srt')) {
-      text = 'WEBVTT\n\n' + text
-        .replace(/\r\n/g, '\n')
-        .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
-        .replace(/^\d+\n/gm, '');
-    }
-    clearSubtitleTrack();
-    subOffset.value = 0;
-    currentSubtitle.value = '_local';
-    activeSubUrl.value = 'local://' + file.name;
-    subtitleCues = parseVTT(text);
-    setTrackFromCues();
-  };
-  reader.readAsText(file);
-}
-
 function adjustOffset(delta) {
   subOffset.value = Math.round((subOffset.value + delta) * 10) / 10;
 }
 
 
-watch(subOffset, () => { if (subtitleCues.length) setTrackFromCues(); });
+// When subtitle tracks change, update Video.js (debounced to avoid duplicates)
+let addTracksTimer = null;
+watch(subtitleTracks, () => {
+  clearTimeout(addTracksTimer);
+  addTracksTimer = setTimeout(() => addAllTracksToPlayer(), 500);
+}, { deep: true });
 
 async function autoSync() {
-  if (!activeSubUrl.value || syncing.value) return;
-  const currentTime = videoEl.value?.currentTime ?? 0;
-  if (currentTime < 10) {
-    alert('Whisper sync requires at least 10 seconds of playback. Seek forward and try again.');
-    return;
-  }
-
-  syncing.value = true;
-  syncStatus.value = 'Listening...';
-
-  // Send ALL subtitle cues — offset might be way off so windowing would miss the match
-  const allCues = subtitleCues.map(c => ({ start: c.start, end: c.end, text: c.text }));
-
-  // Determine subtitle language label
-  const subTrack = subtitleTracks.value.find(t => t.language === currentSubtitle.value);
-  const subLang = subTrack?.label || subTrack?.language || 'English';
-
-  try {
-    const { data } = await axios.post(`/api/movies/${props.movieId}/whisper-sync`, {
-      currentTime,
-      subtitleCues: allCues,
-      subtitleLanguage: subLang,
-    }, { timeout: 180000 });
-
-    subOffset.value = Math.round(data.offset * 10) / 10;
-    const pct = Math.round(data.confidence * 100);
-    syncStatus.value = `Synced: ${subOffset.value >= 0 ? '+' : ''}${subOffset.value.toFixed(1)}s (${pct}% confidence)`;
-    setTimeout(() => { syncStatus.value = ''; }, 5000);
-  } catch (err) {
-    console.error('[whisper-sync] Failed:', err);
-    const msg = err.response?.data?.error || err.message;
-    syncStatus.value = `Sync failed: ${msg}`;
-    setTimeout(() => { syncStatus.value = ''; }, 8000);
-  } finally {
-    syncing.value = false;
-  }
+  // TODO: re-implement with Video.js text track API
+  syncStatus.value = 'Not available yet';
+  setTimeout(() => { syncStatus.value = ''; }, 3000);
 }
 
 async function startPlayer() {
@@ -464,12 +314,13 @@ async function startPlayer() {
       fluid: true,
       playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2],
       controlBar: {
-        subtitlesButton: true,
-        captionsButton: true,
+        subsCapsButton: true,
       },
       sources: [{ src: activeStreamUrl.value, type: 'video/mp4' }],
     });
     vjsPlayer.on('error', () => onVideoError());
+    // Add any already-fetched subtitle tracks
+    if (subtitleTracks.value.length) addAllTracksToPlayer();
   }
 
   statsInterval = setInterval(pollStats, 2000);
@@ -530,8 +381,6 @@ async function removeMovie() {
 
 onUnmounted(() => {
   if (vjsPlayer) { vjsPlayer.dispose(); vjsPlayer = null; }
-  if (activeBlobUrl) URL.revokeObjectURL(activeBlobUrl);
-  clearSubtitleTrack();
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
   // Destroy torrent and delete cached files immediately
