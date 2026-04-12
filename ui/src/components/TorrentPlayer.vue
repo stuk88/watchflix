@@ -339,9 +339,37 @@ async function startPlayer() {
       controlBar: {
         subsCapsButton: true,
       },
+      userActions: {
+        hotkeys: function(event) {
+          // Left arrow: -5s, Right arrow: +5s
+          if (event.which === 37) { this.currentTime(this.currentTime() - 5); }
+          else if (event.which === 39) { this.currentTime(this.currentTime() + 5); }
+          // Space: play/pause
+          else if (event.which === 32) { this.paused() ? this.play() : this.pause(); }
+        }
+      },
       sources: [{ src: activeStreamUrl.value, type: 'video/mp4' }],
     });
     vjsPlayer.on('error', () => onVideoError());
+
+    // Add skip buttons to control bar
+    const Button = videojs.getComponent('Button');
+    class SkipBackButton extends Button {
+      handleClick() { vjsPlayer.currentTime(vjsPlayer.currentTime() - 5); }
+      buildCSSClass() { return 'vjs-skip-back vjs-control vjs-button'; }
+    }
+    class SkipForwardButton extends Button {
+      handleClick() { vjsPlayer.currentTime(vjsPlayer.currentTime() + 5); }
+      buildCSSClass() { return 'vjs-skip-forward vjs-control vjs-button'; }
+    }
+    videojs.registerComponent('SkipBackButton', SkipBackButton);
+    videojs.registerComponent('SkipForwardButton', SkipForwardButton);
+    const skipBack = vjsPlayer.controlBar.addChild('SkipBackButton', {}, 1);
+    skipBack.el().innerHTML = '<span class="vjs-icon-placeholder">-5s</span>';
+    skipBack.el().title = 'Back 5s (←)';
+    const skipFwd = vjsPlayer.controlBar.addChild('SkipForwardButton', {}, 2);
+    skipFwd.el().innerHTML = '<span class="vjs-icon-placeholder">+5s</span>';
+    skipFwd.el().title = 'Forward 5s (→)';
     // Add any already-fetched subtitle tracks
     if (subtitleTracks.value.length) addAllTracksToPlayer();
   }
