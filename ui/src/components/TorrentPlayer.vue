@@ -230,7 +230,15 @@ function addAllTracksToPlayer() {
                 const p = s.replace(',','.').split(':');
                 return p.length === 3 ? parseInt(p[0])*3600+parseInt(p[1])*60+parseFloat(p[2]) : parseInt(p[0])*60+parseFloat(p[1]);
               };
-              const cueText = isRTL(lang) ? '\u202B' + text + '\u202C' : text;
+              let cueText = text;
+              if (isRTL(lang)) {
+                // Fix punctuation: move leading ?!.,;:- to end of each line
+                cueText = text.split('\n').map(line => {
+                  const match = line.match(/^([?!.,;:\-]+)(.+)/);
+                  return match ? match[2] + match[1] : line;
+                }).join('\n');
+                cueText = '\u202B' + cueText + '\u202C';
+              }
               track.addCue(new VTTCue(parseT(startStr), parseT(endStr), cueText));
             }
             console.log('[subs] Loaded', track.cues.length, 'cues for', label);
@@ -311,9 +319,48 @@ watch(subtitleTracks, () => {
 }, { deep: true });
 
 async function autoSync() {
-  // TODO: re-implement with Video.js text track API
-  syncStatus.value = 'Not available yet';
-  setTimeout(() => { syncStatus.value = ''; }, 3000);
+  if (syncing.value) return;
+  const player = vjsPlayer;
+  if (!player) return;
+  const currentTime = player.currentTime();
+  if (currentTime < 10) {
+    alert('Whisper sync requires at least 10 seconds of playback. Seek forward and try again.');
+    return;
+  }
+
+  // Get active track cues
+  const tt = player.textTracks();
+  let activeCues = [];
+  let subLang = 'English';
+  for (let i = 0; i < tt.length; i++) {
+    if (tt[i].mode === 'showing' && tt[i].cues?.length) {
+      activeCues = Array.from(tt[i].cues).map(c => ({ start: c.startTime, end: c.endTime, text: c.text.replace(/[\u202B\u202C]/g, '') }));
+      subLang = tt[i].label || tt[i].language || 'English';
+      break;
+    }
+  }
+  if (!activeCues.length) { syncStatus.value = 'No active subtitle'; setTimeout(() => { syncStatus.value = ''; }, 3000); return; }
+
+  syncing.value = true;
+  syncStatus.value = 'Listening...';
+  try {
+    const { data } = await axios.post(`/api/movies/${props.movieId}/whisper-sync`, {
+      currentTime,
+      subtitleCues: activeCues,
+      subtitleLanguage: subLang,
+    }, { timeout: 180000 });
+
+    subOffset.value = Math.round(data.offset * 10) / 10;
+    const pct = Math.round(data.confidence * 100);
+    syncStatus.value = `Synced: ${subOffset.value >= 0 ? '+' : ''}${subOffset.value.toFixed(1)}s (${pct}% confidence)`;
+    setTimeout(() => { syncStatus.value = ''; }, 5000);
+  } catch (err) {
+    const msg = err.response?.data?.error || err.message;
+    syncStatus.value = `Sync failed: ${msg}`;
+    setTimeout(() => { syncStatus.value = ''; }, 8000);
+  } finally {
+    syncing.value = false;
+  }
 }
 
 async function startPlayer() {
