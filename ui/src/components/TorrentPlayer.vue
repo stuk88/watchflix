@@ -186,16 +186,20 @@ function addTorrentSubtitleFiles(subFiles) {
 }
 
 function addAllTracksToPlayer() {
-  if (!vjsPlayer || addAllTracksToPlayer._done) return;
+  if (!vjsPlayer) return;
+  // Only run once — tracks persist in Video.js after first add
+  if (addAllTracksToPlayer._done) return;
+  if (subtitleTracks.value.length === 0) return;
   addAllTracksToPlayer._done = true;
 
   // Wait for player ready
   vjsPlayer.ready(() => {
-    // Add each subtitle as a Video.js text track with lazy-loaded cues
-    // Only add one track per language (best file), to keep the CC menu manageable
+    // Add every subtitle file as a separate Video.js text track
     for (const group of subtitleTracks.value) {
-      const bestFile = group.files[0]; // first file is usually best
-      const label = group.label || group.language;
+      for (const file of group.files) {
+      const label = group.files.length > 1
+        ? `${group.label} - ${file.filename}`
+        : (group.label || group.language);
       const lang = group.language || 'en';
 
       const track = vjsPlayer.addTextTrack('subtitles', label, lang);
@@ -212,7 +216,7 @@ function addAllTracksToPlayer() {
         if (track.mode === 'showing' && !loaded) {
           loaded = true;
           try {
-            const resp = await fetch(bestFile.url);
+            const resp = await fetch(file.url);
             const vtt = await resp.text();
             const blocks = vtt.split(/\n{2,}/);
             for (const block of blocks) {
@@ -226,14 +230,32 @@ function addAllTracksToPlayer() {
                 const p = s.replace(',','.').split(':');
                 return p.length === 3 ? parseInt(p[0])*3600+parseInt(p[1])*60+parseFloat(p[2]) : parseInt(p[0])*60+parseFloat(p[1]);
               };
-              track.addCue(new VTTCue(parseT(startStr), parseT(endStr), text));
+              const cueText = isRTL(lang) ? '\u202B' + text + '\u202C' : text;
+              track.addCue(new VTTCue(parseT(startStr), parseT(endStr), cueText));
             }
             console.log('[subs] Loaded', track.cues.length, 'cues for', label);
 
-            // Apply RTL
+            // Apply RTL to all cue rendering elements
             if (isRTL(lang)) {
-              const display = vjsPlayer.el().querySelector('.vjs-text-track-display');
-              if (display) { display.style.direction = 'rtl'; display.style.unicodeBidi = 'bidi-override'; }
+              const el = vjsPlayer.el();
+              const display = el.querySelector('.vjs-text-track-display');
+              if (display) {
+                display.style.direction = 'rtl';
+                display.style.unicodeBidi = 'plaintext';
+              }
+              // Also inject a style for all cue divs
+              if (!el.querySelector('#rtl-cue-style')) {
+                const style = document.createElement('style');
+                style.id = 'rtl-cue-style';
+                style.textContent = '.vjs-text-track-display div { direction: rtl !important; unicode-bidi: plaintext !important; text-align: center !important; }';
+                el.appendChild(style);
+              }
+            } else {
+              const el = vjsPlayer.el();
+              const display = el.querySelector('.vjs-text-track-display');
+              if (display) { display.style.direction = ''; display.style.unicodeBidi = ''; }
+              const rtlStyle = el.querySelector('#rtl-cue-style');
+              if (rtlStyle) rtlStyle.remove();
             }
           } catch (err) {
             console.error('[subs] Failed to load', label, err);
@@ -246,8 +268,9 @@ function addAllTracksToPlayer() {
         if (!vjsPlayer) { clearInterval(interval); return; }
         checkAndLoad();
       }, 500);
-    }
-    console.log('[subs] Registered', subtitleTracks.value.length, 'language tracks');
+    } // end file loop
+    } // end group loop
+    console.log('[subs] Registered tracks for', subtitleTracks.value.length, 'languages');
   });
 
   // Listen for track changes to apply RTL and track active state
