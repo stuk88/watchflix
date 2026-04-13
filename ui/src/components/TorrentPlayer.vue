@@ -232,9 +232,10 @@ function addAllTracksToPlayer() {
               };
               let cueText = text;
               if (isRTL(lang)) {
-                // Fix punctuation: move leading ?!.,;:- to end of each line
+                // Fix punctuation: move leading ?!.,;: to end of line
+                // Keep - at start (dialogue dash indicating speaker)
                 cueText = text.split('\n').map(line => {
-                  const match = line.match(/^([?!.,;:\-]+)(.+)/);
+                  const match = line.match(/^([?!.,;:]+)(.+)/);
                   return match ? match[2] + match[1] : line;
                 }).join('\n');
                 cueText = '\u202B' + cueText + '\u202C';
