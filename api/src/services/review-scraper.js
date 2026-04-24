@@ -1,5 +1,6 @@
 import { chromium } from 'playwright-core';
 import { HfInference } from '@huggingface/inference';
+import config from '../config.js';
 
 const BROWSER_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
@@ -43,7 +44,7 @@ async function newContext() {
 }
 
 async function analyzeWithLLM(reviewText, movieTitle) {
-  const token = process.env.HF_TOKEN;
+  const token = config.hfToken;
   if (!token) throw new Error('HF_TOKEN not set');
 
   const hf = new HfInference(token);
