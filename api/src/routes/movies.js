@@ -3,9 +3,10 @@ import axios from 'axios';
 import db from '../db.js';
 import config, { isAllowedProxyUrl } from '../config.js';
 import { makeMagnet } from '../scrapers/torrents.js';
-import { getVideoFile, getStats, destroyTorrent } from '../services/streamer.js';
+import { getVideoFile, getStats, destroyTorrent, getFileInfo, saveToOffline, cancelSave } from '../services/streamer.js';
 import { extractEmbedUrl, getAvailableServers } from '../services/stream-extractor.js';
 import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
+import { getCriticScores } from '../services/review-scraper.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -24,6 +25,7 @@ router.get('/', (req, res) => {
     sort = 'added_at',
     order = 'desc',
     genre,
+    country,
     source,
     min_rating,
     search,
@@ -32,6 +34,7 @@ router.get('/', (req, res) => {
     only_hidden,
     type = 'all',
     language,
+    rating_provider = 'imdb',
   } = req.query;
 
   const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -42,6 +45,10 @@ router.get('/', (req, res) => {
     conditions.push("genre LIKE @genre");
     params.genre = `%${genre}%`;
   }
+  if (country) {
+    conditions.push("country LIKE @country");
+    params.country = `%${country}%`;
+  }
   if (source && source !== 'all') {
     if (source === 'both') {
       conditions.push("(source = @source OR source = 'both')");
@@ -51,7 +58,12 @@ router.get('/', (req, res) => {
     params.source = source;
   }
   if (min_rating) {
-    conditions.push("(imdb_rating >= @min_rating OR imdb_rating IS NULL)");
+    const ratingFilterMap = {
+      imdb: "(imdb_rating >= @min_rating OR (imdb_rating IS NULL AND source IN ('hdrezka','filmix','seazonvar')))",
+      rt: "(CAST(REPLACE(rt_rating, '%', '') AS REAL) >= @min_rating OR (rt_rating IS NULL AND source IN ('hdrezka','filmix','seazonvar')))",
+      meta: "(meta_rating >= @min_rating OR (meta_rating IS NULL AND source IN ('hdrezka','filmix','seazonvar')))",
+    };
+    conditions.push(ratingFilterMap[rating_provider] || ratingFilterMap.imdb);
     params.min_rating = parseFloat(min_rating);
   }
   if (search) {
@@ -87,9 +99,19 @@ router.get('/', (req, res) => {
   const allConditions = [typeCondition, ...conditions];
   const where = `WHERE ${allConditions.join(' AND ')}`;
 
-  const allowedSorts = ['added_at', 'imdb_rating', 'title', 'year'];
-  const sortCol = allowedSorts.includes(sort) ? sort : 'added_at';
   const sortOrder = order === 'asc' ? 'ASC' : 'DESC';
+  let sortExpr;
+  if (sort === 'rating') {
+    const ratingSortMap = {
+      imdb: 'm.imdb_rating',
+      rt: "CAST(REPLACE(m.rt_rating, '%', '') AS REAL)",
+      meta: 'm.meta_rating',
+    };
+    sortExpr = ratingSortMap[rating_provider] || 'm.imdb_rating';
+  } else {
+    const allowedSorts = { added_at: 'm.added_at', title: 'm.title', year: 'm.year' };
+    sortExpr = allowedSorts[sort] || 'm.added_at';
+  }
 
   // CTE groups series by series_imdb_id, keeping MIN(id) as the representative row
   const cte = `WITH series_reps AS (
@@ -100,7 +122,7 @@ router.get('/', (req, res) => {
 
   const total = db.prepare(`${cte} SELECT COUNT(*) as c ${fromJoin} ${where}`).get(params).c;
   const movies = db.prepare(
-    `${cte} SELECT m.*, ${episodeCount} ${fromJoin} ${where} ORDER BY m.${sortCol} ${sortOrder} LIMIT @limit OFFSET @offset`
+    `${cte} SELECT m.*, ${episodeCount} ${fromJoin} ${where} ORDER BY ${sortExpr} ${sortOrder} LIMIT @limit OFFSET @offset`
   ).all({ ...params, limit: parseInt(limit), offset });
 
   res.json({
@@ -109,6 +131,22 @@ router.get('/', (req, res) => {
     page: parseInt(page),
     pages: Math.ceil(total / parseInt(limit)),
   });
+});
+
+// Distinct countries for filter dropdown
+router.get('/countries', (req, res) => {
+  const rows = db.prepare(
+    "SELECT DISTINCT country FROM movies WHERE country IS NOT NULL AND country != ''"
+  ).all();
+  const countrySet = new Set();
+  for (const row of rows) {
+    for (const c of row.country.split(',')) {
+      const trimmed = c.trim();
+      if (trimmed) countrySet.add(trimmed);
+    }
+  }
+  const countries = [...countrySet].sort();
+  res.json({ countries });
 });
 
 // Get single movie
@@ -141,21 +179,33 @@ router.get('/:id/episodes', (req, res) => {
 
 // Toggle favorite
 router.patch('/:id/favorite', (req, res) => {
-  const movie = db.prepare('SELECT id, is_favorite FROM movies WHERE id = ?').get(req.params.id);
+  const movie = db.prepare('SELECT id, imdb_id, is_favorite FROM movies WHERE id = ?').get(req.params.id);
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
   const newVal = movie.is_favorite ? 0 : 1;
   db.prepare('UPDATE movies SET is_favorite = ? WHERE id = ?').run(newVal, movie.id);
+  if (movie.imdb_id) {
+    db.prepare(`
+      INSERT INTO user_preferences (imdb_id, is_favorite) VALUES (?, ?)
+      ON CONFLICT(imdb_id) DO UPDATE SET is_favorite = excluded.is_favorite, updated_at = CURRENT_TIMESTAMP
+    `).run(movie.imdb_id, newVal);
+  }
   res.json({ id: movie.id, is_favorite: newVal });
 });
 
 // Toggle hidden
 router.patch('/:id/hide', (req, res) => {
-  const movie = db.prepare('SELECT id, is_hidden FROM movies WHERE id = ?').get(req.params.id);
+  const movie = db.prepare('SELECT id, imdb_id, is_hidden FROM movies WHERE id = ?').get(req.params.id);
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
   const newVal = movie.is_hidden ? 0 : 1;
   db.prepare('UPDATE movies SET is_hidden = ? WHERE id = ?').run(newVal, movie.id);
+  if (movie.imdb_id) {
+    db.prepare(`
+      INSERT INTO user_preferences (imdb_id, is_hidden) VALUES (?, ?)
+      ON CONFLICT(imdb_id) DO UPDATE SET is_hidden = excluded.is_hidden, updated_at = CURRENT_TIMESTAMP
+    `).run(movie.imdb_id, newVal);
+  }
   res.json({ id: movie.id, is_hidden: newVal });
 });
 
@@ -286,7 +336,16 @@ router.get('/:id/alt-sources', async (req, res) => {
       byHash.set(hash, alt);
     }
   }
-  const deduped = [...byHash.values()];
+
+  // Filter out torrents known to be dead
+  const deadRows = db.prepare(
+    "SELECT infohash FROM dead_torrents WHERE reported_at > datetime('now', '-30 days')"
+  ).all();
+  const deadSet = new Set(deadRows.map(r => r.infohash));
+  const deduped = [...byHash.values()].filter(alt => {
+    const hashMatch = alt.magnet.match(/btih:([a-fA-F0-9]+)/i);
+    return !hashMatch || !deadSet.has(hashMatch[1].toUpperCase());
+  });
 
   // Sort by seeds descending
   deduped.sort((a, b) => b.seeds - a.seeds);
@@ -301,10 +360,55 @@ router.delete('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+function serveFileWithRange(filePath, req, res) {
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  const mimeTypes = { mp4: 'video/mp4', mkv: 'video/x-matroska', avi: 'video/x-msvideo', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4' };
+  const contentType = mimeTypes[ext] || 'video/mp4';
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Range',
+    'Access-Control-Expose-Headers': 'Content-Range, Content-Length',
+  };
+  const range = req.headers.range;
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    res.writeHead(206, {
+      ...corsHeaders,
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+      'Content-Type': contentType,
+    });
+    const stream = fs.createReadStream(filePath, { start, end });
+    stream.pipe(res);
+    stream.on('error', () => res.end());
+  } else {
+    res.writeHead(200, {
+      ...corsHeaders,
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+    });
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+    stream.on('error', () => res.end());
+  }
+}
+
 // Stream torrent video via server-side WebTorrent (HTTP range support)
 router.get('/:id/stream', async (req, res) => {
   const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+  // Serve from offline storage if available
+  if (movie.offline_path && fs.existsSync(movie.offline_path)) {
+    return serveFileWithRange(movie.offline_path, req, res);
+  }
+
   if (!movie.torrent_magnet) return res.status(400).json({ error: 'No torrent magnet' });
 
   try {
@@ -361,10 +465,22 @@ router.get('/:id/stream', async (req, res) => {
 // Destroy torrent and delete cached files (called when player closes)
 router.delete('/:id/stream', (req, res) => {
   const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
-  if (!movie?.torrent_magnet) return res.json({ ok: false });
-  const destroyed = destroyTorrent(movie.torrent_magnet);
-  console.log(`[stream] Torrent cleanup for movie ${req.params.id}: ${destroyed ? 'destroyed' : 'not active'}`);
+  let destroyed = false;
+  if (movie?.torrent_magnet) {
+    destroyed = destroyTorrent(movie.torrent_magnet);
+  }
+  // Clear stream cache for this movie (HLS URLs, embed cache)
+  db.prepare('DELETE FROM stream_cache WHERE movie_id = ?').run(req.params.id);
+  db.prepare('UPDATE movies SET cached_stream_url = NULL, stream_cached_at = NULL WHERE id = ?').run(req.params.id);
+  console.log(`[stream] Cleanup for movie ${req.params.id}: torrent ${destroyed ? 'destroyed' : 'skipped'}, cache cleared`);
   res.json({ ok: true, destroyed });
+});
+
+// Clean up cached stream data (called by non-torrent players on close)
+router.post('/:id/cleanup-cache', (req, res) => {
+  db.prepare('DELETE FROM stream_cache WHERE movie_id = ?').run(req.params.id);
+  db.prepare('UPDATE movies SET cached_stream_url = NULL, stream_cached_at = NULL WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
 });
 
 // Get torrent streaming stats
@@ -373,6 +489,122 @@ router.get('/:id/stream-stats', (req, res) => {
   if (!movie?.torrent_magnet) return res.json({ peers: 0 });
   const stats = getStats(movie.torrent_magnet);
   res.json(stats || { peers: 0 });
+});
+
+// Critic review scores (LLM-analyzed from professional reviews)
+const CRITIC_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+router.get('/:id/critic-scores', async (req, res) => {
+  const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+  const cached = db.prepare('SELECT * FROM critic_scores WHERE movie_id = ?').all(movie.id);
+  if (cached.length > 0) {
+    const freshEnough = cached.every(
+      row => Date.now() - new Date(row.scraped_at).getTime() < CRITIC_CACHE_TTL
+    );
+    if (freshEnough) {
+      return res.json({ criticScores: cached.map(rowToScore), fromCache: true });
+    }
+  }
+
+  const title = movie.title_en || movie.title;
+  if (!title) return res.json({ criticScores: [], error: 'No title' });
+
+  try {
+    const scores = await getCriticScores(title, movie.year);
+
+    const upsert = db.prepare(`
+      INSERT INTO critic_scores (movie_id, source, url, story, acting, direction, cinematography, production_design, editing, sound, emotional_impact, summary, scraped_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(movie_id, source) DO UPDATE SET
+        url=excluded.url, story=excluded.story, acting=excluded.acting, direction=excluded.direction,
+        cinematography=excluded.cinematography, production_design=excluded.production_design,
+        editing=excluded.editing, sound=excluded.sound, emotional_impact=excluded.emotional_impact,
+        summary=excluded.summary, scraped_at=excluded.scraped_at
+    `);
+
+    for (const s of scores) {
+      upsert.run(
+        movie.id, s.source, s.url,
+        s.scores.story, s.scores.acting, s.scores.direction, s.scores.cinematography,
+        s.scores.productionDesign, s.scores.editing, s.scores.sound, s.scores.emotionalImpact,
+        s.summary
+      );
+    }
+
+    const updated = db.prepare('SELECT * FROM critic_scores WHERE movie_id = ?').all(movie.id);
+    res.json({ criticScores: updated.map(rowToScore), fromCache: false });
+  } catch (err) {
+    console.error('[critic-scores] Scraping failed:', err.message);
+    if (cached.length > 0) {
+      return res.json({ criticScores: cached.map(rowToScore), fromCache: true });
+    }
+    res.status(500).json({ error: 'Failed to fetch critic scores' });
+  }
+});
+
+function rowToScore(row) {
+  return {
+    source: row.source,
+    url: row.url,
+    scores: {
+      story: row.story,
+      acting: row.acting,
+      direction: row.direction,
+      cinematography: row.cinematography,
+      productionDesign: row.production_design,
+      editing: row.editing,
+      sound: row.sound,
+      emotionalImpact: row.emotional_impact,
+    },
+    summary: row.summary,
+    scrapedAt: row.scraped_at,
+  };
+}
+
+// Save torrent video to permanent offline storage
+router.post('/:id/save-offline', (req, res) => {
+  const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+  if (!movie.torrent_magnet) return res.status(400).json({ error: 'No torrent magnet' });
+
+  if (movie.offline_path && fs.existsSync(movie.offline_path)) {
+    return res.json({ status: 'saved' });
+  }
+
+  const fileInfo = getFileInfo(movie.torrent_magnet);
+  if (!fileInfo) return res.status(400).json({ error: 'No active torrent stream — start streaming first' });
+
+  const ext = path.extname(fileInfo.filename) || '.mp4';
+  const destPath = path.join(config.offlineDir, `${movie.id}${ext}`);
+  fs.mkdirSync(config.offlineDir, { recursive: true });
+
+  saveToOffline(movie.torrent_magnet, destPath)
+    .then(() => {
+      db.prepare('UPDATE movies SET offline_path = ? WHERE id = ?').run(destPath, movie.id);
+      console.log(`[offline] Saved movie ${movie.id} to ${destPath}`);
+    })
+    .catch((err) => {
+      console.error(`[offline] Save failed for movie ${movie.id}:`, err.message);
+      try { fs.unlinkSync(destPath); } catch {}
+    });
+
+  res.json({ status: 'saving', size: fileInfo.size });
+});
+
+// Delete offline copy of a movie
+router.delete('/:id/save-offline', (req, res) => {
+  const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
+  if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+  if (movie.torrent_magnet) cancelSave(movie.torrent_magnet);
+
+  if (movie.offline_path) {
+    try { fs.unlinkSync(movie.offline_path); } catch {}
+    db.prepare('UPDATE movies SET offline_path = NULL WHERE id = ?').run(movie.id);
+  }
+  res.json({ ok: true });
 });
 
 // Serve a subtitle file from the torrent as VTT

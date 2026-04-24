@@ -17,19 +17,20 @@
           <span v-if="movie.runtime">{{ movie.runtime }}</span>
           <span v-if="movie.genre" style="color: var(--accent)">{{ movie.genre }}</span>
           <span class="source-badge" :class="sourceClass">{{ sourceLabel }}</span>
+          <span v-if="movie.offline_path" class="offline-badge-hero">💾 Offline</span>
         </div>
 
         <div class="ratings-panel">
-          <div class="rating-item" v-if="movie.imdb_rating">
+          <div class="rating-item" :class="{ 'rating-primary': moviesStore.ratingProvider === 'imdb' }" v-if="movie.imdb_rating">
             <span class="rating-label" style="background:#f5c518;color:#000;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:800">IMDb</span>
             <span class="rating-score" :class="ratingClass(movie.imdb_rating * 10)">{{ movie.imdb_rating }}</span>
             <span class="rating-max">/10</span>
           </div>
-          <div class="rating-item" v-if="movie.rt_rating">
+          <div class="rating-item" :class="{ 'rating-primary': moviesStore.ratingProvider === 'rt' }" v-if="movie.rt_rating">
             <span class="rating-label">🍅</span>
             <span class="rating-score" :class="ratingClass(parseInt(movie.rt_rating))">{{ movie.rt_rating }}</span>
           </div>
-          <div class="rating-item" v-if="movie.meta_rating">
+          <div class="rating-item" :class="{ 'rating-primary': moviesStore.ratingProvider === 'meta' }" v-if="movie.meta_rating">
             <span class="rating-label" style="color:#fc3;font-weight:800">M</span>
             <span class="rating-score" :class="ratingClass(movie.meta_rating)">{{ movie.meta_rating }}</span>
             <span class="rating-max">/100</span>
@@ -50,6 +51,8 @@
             {{ movie.is_favorite ? '★ Favorited' : '☆ Add to Favorites' }}
           </button>
         </div>
+
+        <CriticScores :movie-id="movie.id" />
       </div>
     </div>
 
@@ -109,7 +112,7 @@
 
       <!-- Torrent Player -->
       <div v-if="showTorrent">
-        <TorrentPlayer :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
+        <TorrentPlayer :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" :is-offline="!!activeEpisode.offline_path" />
       </div>
 
       <!-- Single source -->
@@ -117,7 +120,7 @@
         <div v-if="activeEpisode.source_url && activeEpisode.source !== 'torrent'">
           <IframePlayer :source-url="activeEpisode.source_url" />
         </div>
-        <TorrentPlayer v-else-if="activeEpisode.torrent_magnet" :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" />
+        <TorrentPlayer v-else-if="activeEpisode.torrent_magnet" :magnet="activeEpisode.torrent_magnet" :quality="activeEpisode.torrent_quality" :movie-id="activeEpisodeId" :is-offline="!!activeEpisode.offline_path" />
         <div v-else class="empty-state">
           <p>No streaming source available</p>
         </div>
@@ -132,8 +135,12 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import axios from 'axios';
+import { useMoviesStore } from '../stores/movies.js';
 import TorrentPlayer from '../components/TorrentPlayer.vue';
 import IframePlayer from '../components/IframePlayer.vue';
+import CriticScores from '../components/CriticScores.vue';
+
+const moviesStore = useMoviesStore();
 
 const route = useRoute();
 const movie = ref(null);

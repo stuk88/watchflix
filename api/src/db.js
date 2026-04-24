@@ -63,12 +63,48 @@ db.exec(`
   );
 `);
 
+// Persistent user preferences keyed by imdb_id (survives movie deletion/re-scrape)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_preferences (
+    imdb_id TEXT PRIMARY KEY,
+    is_favorite INTEGER DEFAULT 0,
+    is_hidden INTEGER DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// Backfill existing favorites/hidden into user_preferences
+db.exec(`
+  INSERT OR IGNORE INTO user_preferences (imdb_id, is_favorite, is_hidden)
+  SELECT imdb_id, is_favorite, is_hidden FROM movies
+  WHERE imdb_id IS NOT NULL AND (is_favorite = 1 OR is_hidden = 1);
+`);
+
+// Trigger: auto-apply saved preferences when a movie is inserted
+db.exec(`
+  CREATE TRIGGER IF NOT EXISTS apply_user_prefs AFTER INSERT ON movies
+  WHEN NEW.imdb_id IS NOT NULL
+  BEGIN
+    UPDATE movies SET
+      is_favorite = COALESCE((SELECT is_favorite FROM user_preferences WHERE imdb_id = NEW.imdb_id), 0),
+      is_hidden = COALESCE((SELECT is_hidden FROM user_preferences WHERE imdb_id = NEW.imdb_id), 0)
+    WHERE id = NEW.id;
+  END;
+`);
+
+// Migration: add series/episode columns (needed for Russian sources)
+try { db.exec(`ALTER TABLE movies ADD COLUMN type TEXT DEFAULT 'movie'`); } catch (e) {}
+try { db.exec(`ALTER TABLE movies ADD COLUMN series_imdb_id TEXT`); } catch (e) {}
+try { db.exec(`ALTER TABLE movies ADD COLUMN season INTEGER`); } catch (e) {}
+try { db.exec(`ALTER TABLE movies ADD COLUMN episode INTEGER`); } catch (e) {}
+try { db.exec(`ALTER TABLE movies ADD COLUMN episode_title TEXT`); } catch (e) {}
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_series_imdb_id ON movies(series_imdb_id)`);
+
 // Migration: add language column
 try {
   db.exec(`ALTER TABLE movies ADD COLUMN language TEXT DEFAULT 'en'`);
-} catch (e) {
-  // Column already exists
-}
+} catch (e) {}
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_language ON movies(language)`);
 
@@ -79,6 +115,11 @@ try {
   // Column already exists
 }
 
+// Migration: add offline_path column for saved-to-disk movies
+try {
+  db.exec(`ALTER TABLE movies ADD COLUMN offline_path TEXT`);
+} catch (e) {}
+
 // Migration: add cached stream URL columns
 try {
   db.exec(`ALTER TABLE movies ADD COLUMN cached_stream_url TEXT`);
@@ -86,5 +127,43 @@ try {
 try {
   db.exec(`ALTER TABLE movies ADD COLUMN stream_cached_at INTEGER`);
 } catch (e) {}
+
+// Migration: add country column
+try {
+  db.exec(`ALTER TABLE movies ADD COLUMN country TEXT`);
+} catch (e) {}
+
+// Blacklist for torrents confirmed to have no real seeds
+db.exec(`
+  CREATE TABLE IF NOT EXISTS dead_torrents (
+    infohash TEXT PRIMARY KEY,
+    name TEXT,
+    reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    fail_count INTEGER DEFAULT 1
+  );
+  CREATE INDEX IF NOT EXISTS idx_dead_reported ON dead_torrents(reported_at);
+`);
+
+// Critic review scores (LLM-analyzed from professional reviews)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS critic_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    movie_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    url TEXT NOT NULL,
+    story REAL,
+    acting REAL,
+    direction REAL,
+    cinematography REAL,
+    production_design REAL,
+    editing REAL,
+    sound REAL,
+    emotional_impact REAL,
+    summary TEXT,
+    scraped_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(movie_id, source)
+  );
+  CREATE INDEX IF NOT EXISTS idx_critic_movie ON critic_scores(movie_id);
+`);
 
 export default db;

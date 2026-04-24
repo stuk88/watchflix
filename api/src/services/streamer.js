@@ -1,17 +1,22 @@
 import WebTorrent from 'webtorrent';
+import fs from 'fs';
 
 const client = new WebTorrent();
 const activeStreams = new Map(); // magnetHash -> { torrent, lastAccess, timeout }
 
 const IDLE_TIMEOUT = 10 * 60 * 1000; // 10 min idle → destroy torrent
 
+function getHash(magnet) {
+  const match = magnet.match(/btih:([a-fA-F0-9]+)/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
 /**
  * Get or start a torrent, return the largest video file.
  * Resolves once metadata is ready.
  */
 export function getVideoFile(magnet) {
-  const hashMatch = magnet.match(/btih:([a-fA-F0-9]+)/);
-  const hash = hashMatch ? hashMatch[1].toUpperCase() : magnet;
+  const hash = getHash(magnet);
 
   if (activeStreams.has(hash)) {
     const entry = activeStreams.get(hash);
@@ -79,6 +84,7 @@ function scheduleCleanup(hash) {
   const check = () => {
     const entry = activeStreams.get(hash);
     if (!entry) return;
+    if (entry.saving) { setTimeout(check, 60000); return; }
     if (Date.now() - entry.lastAccess > IDLE_TIMEOUT) {
       console.log(`[streamer] Destroying idle torrent: ${hash.substring(0, 8)}...`);
       try { entry.torrent.destroy(); } catch {}
@@ -92,15 +98,20 @@ function scheduleCleanup(hash) {
 
 /**
  * Immediately destroy a torrent and delete its downloaded files.
- * Called when the player closes to free disk space.
+ * If a save is in progress, defers destruction until save completes.
  */
 export function destroyTorrent(magnet) {
-  const hashMatch = magnet.match(/btih:([a-fA-F0-9]+)/);
-  const hash = hashMatch ? hashMatch[1].toUpperCase() : null;
+  const hash = getHash(magnet);
   if (!hash) return false;
 
   const entry = activeStreams.get(hash);
   if (!entry) return false;
+
+  if (entry.saving) {
+    console.log(`[streamer] Save in progress, deferring destroy for ${hash.substring(0, 8)}...`);
+    entry.pendingDestroy = true;
+    return false;
+  }
 
   console.log(`[streamer] Destroying torrent on player close: ${hash.substring(0, 8)}...`);
   try { entry.torrent.destroy(); } catch {}
@@ -108,9 +119,93 @@ export function destroyTorrent(magnet) {
   return true;
 }
 
+/**
+ * Get info about the active torrent's video file.
+ */
+export function getFileInfo(magnet) {
+  const hash = getHash(magnet);
+  const entry = hash && activeStreams.get(hash);
+  if (!entry?.file) return null;
+  return { filename: entry.file.name, size: entry.file.length };
+}
+
+/**
+ * Save the torrent's video file to a permanent path on disk.
+ * Returns a promise that resolves when the copy is complete.
+ * The caller should NOT await this — it runs in the background.
+ */
+export function saveToOffline(magnet, destPath) {
+  const hash = getHash(magnet);
+  if (!hash) throw new Error('Invalid magnet');
+  const entry = activeStreams.get(hash);
+  if (!entry?.file) throw new Error('No active torrent stream');
+  if (entry.saving) throw new Error('Save already in progress');
+
+  entry.saving = true;
+  entry.saveStatus = 'saving';
+  entry.saveProgress = { written: 0, total: entry.file.length };
+  entry.savePath = destPath;
+
+  const readStream = entry.file.createReadStream();
+  const writeStream = fs.createWriteStream(destPath);
+  entry.saveWriteStream = writeStream;
+
+  readStream.on('data', (chunk) => {
+    if (entry.saveProgress) entry.saveProgress.written += chunk.length;
+  });
+
+  return new Promise((resolve, reject) => {
+    readStream.pipe(writeStream);
+
+    writeStream.on('finish', () => {
+      entry.saving = false;
+      entry.saveStatus = 'done';
+      entry.saveWriteStream = null;
+      entry.saveProgress = null;
+      if (entry.pendingDestroy) {
+        destroyTorrent(magnet);
+      }
+      resolve({ size: entry.file.length, filename: entry.file.name });
+    });
+
+    writeStream.on('error', (err) => {
+      try { fs.unlinkSync(destPath); } catch {}
+      entry.saving = false;
+      entry.saveStatus = 'error';
+      entry.saveWriteStream = null;
+      entry.saveProgress = null;
+      entry.savePath = null;
+      if (entry.pendingDestroy) {
+        destroyTorrent(magnet);
+      }
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Cancel an in-progress save and delete the partial file.
+ */
+export function cancelSave(magnet) {
+  const hash = getHash(magnet);
+  if (!hash) return false;
+  const entry = activeStreams.get(hash);
+  if (!entry?.saving) return false;
+
+  if (entry.saveWriteStream) {
+    entry.saveWriteStream.destroy();
+  }
+  try { fs.unlinkSync(entry.savePath); } catch {}
+  entry.saving = false;
+  entry.saveStatus = null;
+  entry.saveWriteStream = null;
+  entry.saveProgress = null;
+  entry.savePath = null;
+  return true;
+}
+
 export function getStats(magnet) {
-  const hashMatch = magnet.match(/btih:([a-fA-F0-9]+)/);
-  const hash = hashMatch ? hashMatch[1].toUpperCase() : null;
+  const hash = getHash(magnet);
   const entry = hash && activeStreams.get(hash);
   if (!entry || !entry.torrent) return null;
   const t = entry.torrent;
@@ -123,5 +218,10 @@ export function getStats(magnet) {
     total: entry.file?.length || 0,
     filename: entry.file?.name || null,
     subtitleFiles: (entry.subtitleFiles || []).map((f, i) => ({ index: i, name: f.name, size: f.length })),
+    saveStatus: entry.saveStatus || null,
+    saveProgress: entry.saveProgress ? {
+      written: entry.saveProgress.written,
+      total: entry.saveProgress.total,
+    } : null,
   };
 }
