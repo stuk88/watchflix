@@ -1,4 +1,4 @@
-node_modules\napi/data\n.DS_Store
+node_modules\n.DS_Store
 .env
 test-results/
 *.bak
