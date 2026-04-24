@@ -53,8 +53,8 @@ export default {
   opensubtitlesApiKey: process.env.OPENSUBTITLES_API_KEY || '',
 
   authToken: process.env.WATCHFLIX_AUTH_TOKEN || '',
-  hfToken: process.env.HF_TOKEN || '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',
-  githubToken: process.env.GITHUB_TOKEN || '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',
+  groqApiKey: process.env.GROQ_API_KEY || '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',
+  githubToken: process.env.GITHUB_TOKEN || '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',
   minImdbRating: 6.0,
   offlineDir: process.env.WATCHFLIX_OFFLINE_DIR || join(__dirname, '..', 'data', 'offline'),
   sources: {

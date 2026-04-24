@@ -1,5 +1,5 @@
 import { chromium } from 'playwright-core';
-import { HfInference } from '@huggingface/inference';
+import axios from 'axios';
 import config from '../config.js';
 
 const BROWSER_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -44,19 +44,25 @@ async function newContext() {
 }
 
 async function analyzeWithLLM(reviewText, movieTitle) {
-  const token = config.hfToken;
-  if (!token) throw new Error('HF_TOKEN not set');
+  const token = config.groqApiKey;
+  if (!token) throw new Error('GROQ_API_KEY not set');
 
-  const hf = new HfInference(token);
-  const response = await hf.chatCompletion({
-    model: 'Qwen/Qwen2.5-7B-Instruct',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `Movie: "${movieTitle}"\n\nReview text:\n${reviewText}` },
-    ],
-    max_tokens: 300,
-    temperature: 0.1,
-  });
+  const { data: response } = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Movie: "${movieTitle}"\n\nReview text:\n${reviewText}` },
+      ],
+      max_tokens: 300,
+      temperature: 0.1,
+    },
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 30000,
+    }
+  );
 
   const content = response.choices[0]?.message?.content || '';
   const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -195,49 +201,54 @@ async function scrapeMetacriticSources(movieTitle) {
 
     if (!metacriticUrl) return [];
 
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(5000);
 
-    let prevCount = 0;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 15; i++) {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      await page.waitForTimeout(800);
-      const count = await page.evaluate(() => document.querySelectorAll('a[href*="http"]').length);
-      if (count === prevCount) break;
-      prevCount = count;
+      await page.waitForTimeout(1000);
     }
 
-    const reviews = await page.evaluate(() => {
-      const results = [];
-      const seen = new Set();
-      const links = document.querySelectorAll('a');
-
-      for (const a of links) {
-        if (!a.textContent?.includes('FULL REVIEW')) continue;
-        const url = a.getAttribute('href');
-        if (!url || !url.startsWith('http')) continue;
-
-        const container = a.closest('div')?.parentElement;
-        if (!container) continue;
-        const text = container.innerText || '';
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-        if (lines.length < 3) continue;
-
-        const scoreNum = parseInt(lines[0]);
-        const source = lines[1];
-        const snippet = lines.slice(2).filter(l => l !== 'FULL REVIEW' && !l.startsWith('By ')).join(' ');
-
-        if (!source || seen.has(source)) continue;
-        seen.add(source);
-
-        results.push({
-          source,
-          snippet: snippet.slice(0, 500),
-          url,
-          score: isNaN(scoreNum) ? 0 : scoreNum,
-        });
+    // Collect external review URLs keyed by source name
+    const urlMap = await page.evaluate(() => {
+      const map = {};
+      const anchors = document.querySelectorAll('a[href^="http"]');
+      for (const a of anchors) {
+        const href = a.getAttribute('href') || '';
+        if (href.includes('metacritic.com')) continue;
+        const text = (a.textContent || '').trim();
+        if (text.includes('FULL REVIEW')) map[Object.keys(map).length] = href;
       }
-      return results;
+      return map;
     });
+    const urls = Object.values(urlMap);
+
+    // Parse reviews from body text (reliable across Metacritic layout changes)
+    const bodyText = await page.evaluate(() => document.body.innerText);
+    const blocks = bodyText.split('FULL REVIEW');
+    const reviews = [];
+    const seen = new Set();
+    let urlIdx = 0;
+
+    for (const block of blocks) {
+      const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+      let score = null, source = null, snippet = '', author = null;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i];
+        if (!author && line.startsWith('By ')) { author = line; continue; }
+        if (author && !snippet && !source && line.length > 40) { snippet = line; continue; }
+        if (snippet && !source && !/^\d+$/.test(line) && !/^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)/.test(line)) { source = line; continue; }
+        if (source && score === null && /^\d+$/.test(line)) { score = parseInt(line); break; }
+      }
+      if (!source || seen.has(source)) { urlIdx++; continue; }
+      seen.add(source);
+      reviews.push({
+        source,
+        snippet: snippet.slice(0, 500),
+        url: urls[urlIdx] || '',
+        score: score ?? 0,
+      });
+      urlIdx++;
+    }
 
     return reviews;
   } catch {
