@@ -54,6 +54,7 @@ export default {
 
   authToken: process.env.WATCHFLIX_AUTH_TOKEN || '',
   hfToken: process.env.HF_TOKEN || '',
+  githubToken: process.env.GITHUB_TOKEN || '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',
   minImdbRating: 6.0,
   offlineDir: process.env.WATCHFLIX_OFFLINE_DIR || join(__dirname, '..', 'data', 'offline'),
   sources: {

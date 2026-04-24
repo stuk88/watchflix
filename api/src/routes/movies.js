@@ -493,11 +493,66 @@ router.get('/:id/stream-stats', (req, res) => {
 
 // Critic review scores (LLM-analyzed from professional reviews)
 const CRITIC_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+const SCORES_REPO = 'stuk88/watchflix-scores';
+const SCORES_RAW_BASE = `https://raw.githubusercontent.com/${SCORES_REPO}/main/scores`;
+
+async function fetchSharedScores(imdbId) {
+  try {
+    const { data } = await axios.get(`${SCORES_RAW_BASE}/${imdbId}.json`, { timeout: 5000 });
+    if (data?.criticScores?.length) return data.criticScores;
+  } catch {}
+  return null;
+}
+
+async function submitSharedScores(imdbId, title, criticScores) {
+  const ghToken = config.githubToken;
+  if (!ghToken) return;
+  try {
+    await axios.post(
+      `https://api.github.com/repos/${SCORES_REPO}/issues`,
+      {
+        title: `score: ${imdbId}`,
+        body: JSON.stringify({ imdbId, title, criticScores }, null, 2),
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${ghToken}`,
+          Accept: 'application/vnd.github+json',
+        },
+        timeout: 10000,
+      }
+    );
+    console.log(`[critic-scores] Submitted ${imdbId} to shared repo`);
+  } catch (err) {
+    console.error('[critic-scores] GitHub submit failed:', err.message);
+  }
+}
+
+function upsertLocalScores(movieId, scores) {
+  const upsert = db.prepare(`
+    INSERT INTO critic_scores (movie_id, source, url, story, acting, direction, cinematography, production_design, editing, sound, emotional_impact, summary, scraped_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(movie_id, source) DO UPDATE SET
+      url=excluded.url, story=excluded.story, acting=excluded.acting, direction=excluded.direction,
+      cinematography=excluded.cinematography, production_design=excluded.production_design,
+      editing=excluded.editing, sound=excluded.sound, emotional_impact=excluded.emotional_impact,
+      summary=excluded.summary, scraped_at=excluded.scraped_at
+  `);
+  for (const s of scores) {
+    upsert.run(
+      movieId, s.source, s.url || '',
+      s.scores.story, s.scores.acting, s.scores.direction, s.scores.cinematography,
+      s.scores.productionDesign, s.scores.editing, s.scores.sound, s.scores.emotionalImpact,
+      s.summary || ''
+    );
+  }
+}
 
 router.get('/:id/critic-scores', async (req, res) => {
   const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
+  // 1. Local SQLite cache
   const cached = db.prepare('SELECT * FROM critic_scores WHERE movie_id = ?').all(movie.id);
   if (cached.length > 0) {
     const freshEnough = cached.every(
@@ -511,26 +566,24 @@ router.get('/:id/critic-scores', async (req, res) => {
   const title = movie.title_en || movie.title;
   if (!title) return res.json({ criticScores: [], error: 'No title' });
 
+  // 2. Shared GitHub scores
+  if (movie.imdb_id) {
+    const shared = await fetchSharedScores(movie.imdb_id);
+    if (shared) {
+      upsertLocalScores(movie.id, shared);
+      const rows = db.prepare('SELECT * FROM critic_scores WHERE movie_id = ?').all(movie.id);
+      return res.json({ criticScores: rows.map(rowToScore), fromCache: true, source: 'github' });
+    }
+  }
+
+  // 3. Scrape fresh
   try {
     const scores = await getCriticScores(title, movie.year);
+    upsertLocalScores(movie.id, scores);
 
-    const upsert = db.prepare(`
-      INSERT INTO critic_scores (movie_id, source, url, story, acting, direction, cinematography, production_design, editing, sound, emotional_impact, summary, scraped_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(movie_id, source) DO UPDATE SET
-        url=excluded.url, story=excluded.story, acting=excluded.acting, direction=excluded.direction,
-        cinematography=excluded.cinematography, production_design=excluded.production_design,
-        editing=excluded.editing, sound=excluded.sound, emotional_impact=excluded.emotional_impact,
-        summary=excluded.summary, scraped_at=excluded.scraped_at
-    `);
-
-    for (const s of scores) {
-      upsert.run(
-        movie.id, s.source, s.url,
-        s.scores.story, s.scores.acting, s.scores.direction, s.scores.cinematography,
-        s.scores.productionDesign, s.scores.editing, s.scores.sound, s.scores.emotionalImpact,
-        s.summary
-      );
+    // Share to GitHub (non-blocking)
+    if (movie.imdb_id && scores.length > 0) {
+      submitSharedScores(movie.imdb_id, title, scores).catch(() => {});
     }
 
     const updated = db.prepare('SELECT * FROM critic_scores WHERE movie_id = ?').all(movie.id);
