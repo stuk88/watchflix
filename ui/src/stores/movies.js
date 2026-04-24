@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import axios from 'axios';
 
+const savedProvider = localStorage.getItem('ratingProvider') || 'imdb';
+
 export const useMoviesStore = defineStore('movies', {
   state: () => ({
     movies: [],
@@ -11,12 +13,14 @@ export const useMoviesStore = defineStore('movies', {
     loadingMore: false,
     initialized: false,
     scraping: false,
+    ratingProvider: savedProvider,
     filters: {
       sort: 'added_at',
       order: 'desc',
       genre: '',
+      country: '',
       source: 'all',
-      min_rating: 6,
+      min_rating: savedProvider === 'imdb' ? 6 : 60,
       search: '',
       type: 'all',
       language: 'en',
@@ -24,11 +28,26 @@ export const useMoviesStore = defineStore('movies', {
   }),
 
   actions: {
+    setRatingProvider(provider) {
+      const oldProvider = this.ratingProvider;
+      this.ratingProvider = provider;
+      localStorage.setItem('ratingProvider', provider);
+      const isImdb = (p) => p === 'imdb';
+      if (isImdb(oldProvider) !== isImdb(provider)) {
+        this.filters.min_rating = provider === 'imdb'
+          ? Math.round(this.filters.min_rating / 10 * 2) / 2
+          : Math.round(this.filters.min_rating * 10);
+      }
+      if (this.filters.sort === 'rating') this.fetchMovies(1);
+    },
+
     async fetchMovies(page = 1) {
       this.loading = true;
       try {
-        const params = { page, limit: 40, ...this.filters };
+        const params = { page, limit: 40, ...this.filters, rating_provider: this.ratingProvider };
         if (!params.genre) delete params.genre;
+        if (!params.country) delete params.country;
+        if (!params.search) delete params.search;
         if (params.source === 'all') delete params.source;
         if (params.type === 'all') delete params.type;
         if (params.language === 'all') delete params.language;
@@ -39,6 +58,9 @@ export const useMoviesStore = defineStore('movies', {
         this.pages = data.pages;
       } catch (err) {
         console.error('Failed to fetch movies:', err);
+        if (this.movies.length === 0 && page === 1) {
+          setTimeout(() => this.fetchMovies(1), 2000);
+        }
       } finally {
         this.loading = false;
         this.initialized = true;
@@ -50,8 +72,10 @@ export const useMoviesStore = defineStore('movies', {
       this.loadingMore = true;
       try {
         const nextPage = this.page + 1;
-        const params = { page: nextPage, limit: 40, ...this.filters };
+        const params = { page: nextPage, limit: 40, ...this.filters, rating_provider: this.ratingProvider };
         if (!params.genre) delete params.genre;
+        if (!params.country) delete params.country;
+        if (!params.search) delete params.search;
         if (params.source === 'all') delete params.source;
         if (params.type === 'all') delete params.type;
         if (params.language === 'all') delete params.language;

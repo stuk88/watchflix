@@ -97,8 +97,11 @@ async function createWindow() {
   });
 
   if (isDev) {
-    // Vite dev server — started by `desktop:dev` via concurrently
-    await waitForServer('http://localhost:5173');
+    // Wait for both Vite and API before loading
+    await Promise.all([
+      waitForServer('http://localhost:5173'),
+      waitForServer('http://localhost:3001/api/health'),
+    ]);
     console.log('[main] Loading Vite dev server...');
     mainWindow.loadURL('http://localhost:5173');
   } else {

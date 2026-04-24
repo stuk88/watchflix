@@ -30,6 +30,7 @@ export async function fetchRatings(title, year) {
       runtime: data.Runtime !== 'N/A' ? data.Runtime : null,
       director: data.Director !== 'N/A' ? data.Director : null,
       actors: data.Actors !== 'N/A' ? data.Actors : null,
+      country: data.Country !== 'N/A' ? data.Country : null,
     };
 
     if (data.Ratings) {

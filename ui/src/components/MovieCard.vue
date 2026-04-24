@@ -28,9 +28,10 @@
           📺 {{ seasonLabel }}
         </span>
         <span v-else class="rating-badge" :class="ratingClass">
-          ⭐ {{ movie.imdb_rating || 'N/A' }}
+          {{ ratingIcon }} {{ ratingDisplay }}
         </span>
         <span class="source-badge" :class="sourceClass">{{ sourceLabel }}</span>
+        <span v-if="movie.offline_path" class="offline-badge">💾</span>
       </div>
     </div>
   </div>
@@ -38,17 +39,42 @@
 
 <script setup>
 import { computed } from 'vue';
+import { useMoviesStore } from '../stores/movies.js';
 
 const props = defineProps({ movie: Object, canUnhide: Boolean });
 defineEmits(['toggle-fav', 'hide', 'unhide']);
 
+const store = useMoviesStore();
+
 const firstGenre = computed(() => props.movie.genre?.split(',')[0]?.trim() || null);
 
+const ratingValue = computed(() => {
+  const p = store.ratingProvider;
+  if (p === 'rt') return props.movie.rt_rating ? parseInt(props.movie.rt_rating) : null;
+  if (p === 'meta') return props.movie.meta_rating ?? null;
+  return props.movie.imdb_rating ?? null;
+});
+
+const ratingDisplay = computed(() => {
+  const v = ratingValue.value;
+  if (v == null) return 'N/A';
+  if (store.ratingProvider === 'rt') return v + '%';
+  return v;
+});
+
+const ratingIcon = computed(() => {
+  const p = store.ratingProvider;
+  if (p === 'rt') return '🍅';
+  if (p === 'meta') return 'M';
+  return '⭐';
+});
+
 const ratingClass = computed(() => {
-  const r = props.movie.imdb_rating;
-  if (!r) return '';
-  if (r >= 7) return 'good';
-  if (r >= 5) return 'mid';
+  const v = ratingValue.value;
+  if (v == null) return '';
+  const normalized = store.ratingProvider === 'imdb' ? v * 10 : v;
+  if (normalized >= 70) return 'good';
+  if (normalized >= 50) return 'mid';
   return 'bad';
 });
 

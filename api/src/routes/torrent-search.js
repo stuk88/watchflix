@@ -150,7 +150,14 @@ router.get('/', async (req, res) => {
     }
   }
 
-  const results = [...byHash.values()].sort((a, b) => b.seeds - a.seeds);
+  // Filter out torrents known to be dead (no real seeds)
+  const deadRows = db.prepare(
+    "SELECT infohash FROM dead_torrents WHERE reported_at > datetime('now', '-30 days')"
+  ).all();
+  const deadSet = new Set(deadRows.map(r => r.infohash));
+  const alive = [...byHash.values()].filter(r => !deadSet.has(r.infohash));
+
+  const results = alive.sort((a, b) => b.seeds - a.seeds);
   res.json({ results, total: results.length });
 });
 
@@ -220,6 +227,22 @@ router.post('/add', async (req, res) => {
   `).run(insertData);
 
   res.json({ ok: true, movieId: result.lastInsertRowid, existing: false });
+});
+
+// POST /api/torrent-search/report-dead — blacklist a torrent with no real seeds
+router.post('/report-dead', (req, res) => {
+  const { infohash, name } = req.body;
+  if (!infohash) return res.status(400).json({ error: 'Missing infohash' });
+
+  db.prepare(`
+    INSERT INTO dead_torrents (infohash, name) VALUES (?, ?)
+    ON CONFLICT(infohash) DO UPDATE SET
+      fail_count = fail_count + 1,
+      reported_at = CURRENT_TIMESTAMP
+  `).run(infohash.toUpperCase(), name || null);
+
+  console.log(`[torrent-search] Reported dead torrent: ${infohash.substring(0, 8)}...`);
+  res.json({ ok: true });
 });
 
 export default router;

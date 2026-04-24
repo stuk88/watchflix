@@ -290,6 +290,15 @@ a { color: inherit; text-decoration: none; }
 .source-badge.storrent { background: rgba(100,149,237,0.2); color: cornflowerblue; }
 .source-badge.sboth { background: rgba(255,215,0,0.15); color: gold; }
 .source-badge.sru { background: rgba(229,57,53,0.2); color: #ef5350; }
+.offline-badge { font-size: 10px; }
+.offline-badge-hero {
+  font-size: 12px;
+  background: rgba(119,190,65,0.15);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
 .card-title-ru { font-size: 11px; color: var(--text-muted); opacity: 0.7; margin-top: 2px; }
 .hero-title-ru { font-size: 15px; color: var(--text-muted); margin-top: -4px; margin-bottom: 8px; }
 .episode-section-title { color: var(--accent); font-size: 16px; margin: 16px 0 8px; padding: 0 16px; }
@@ -417,6 +426,13 @@ a { color: inherit; text-decoration: none; }
 .rating-item .rating-max {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.rating-item.rating-primary {
+  background: rgba(119, 190, 65, 0.1);
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(119, 190, 65, 0.3);
 }
 
 /* Source tabs */

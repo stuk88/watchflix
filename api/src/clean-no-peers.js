@@ -23,9 +23,9 @@ async function main() {
   let checked = 0;
   let skipped = 0;
 
-  // 1. Delete torrent-source movies with no magnet link
+  // 1. Delete torrent-source movies with no magnet link (skip favorites & hidden)
   const noMagnet = db.prepare(
-    "SELECT id, title FROM movies WHERE source IN ('torrent', 'both') AND (torrent_magnet IS NULL OR torrent_magnet = '')"
+    "SELECT id, title FROM movies WHERE source IN ('torrent', 'both') AND (torrent_magnet IS NULL OR torrent_magnet = '') AND is_favorite = 0 AND is_hidden = 0"
   ).all();
 
   for (const movie of noMagnet) {
@@ -34,9 +34,9 @@ async function main() {
     deletedNoMagnet++;
   }
 
-  // 2. Re-check YTS movies via YTS API using imdb_id
+  // 2. Re-check YTS movies via YTS API using imdb_id (skip favorites & hidden)
   const ytsMovies = db.prepare(
-    "SELECT id, title, imdb_id FROM movies WHERE source IN ('torrent', 'both') AND imdb_id IS NOT NULL AND imdb_id != ''"
+    "SELECT id, title, imdb_id FROM movies WHERE source IN ('torrent', 'both') AND imdb_id IS NOT NULL AND imdb_id != '' AND is_favorite = 0 AND is_hidden = 0"
   ).all();
 
   console.log(`\nChecking ${ytsMovies.length} torrent movies against YTS API...`);

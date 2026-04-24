@@ -54,13 +54,13 @@ export async function scrape123Movies(pages = 3) {
   let saved = 0;
 
   const insertMovieStmt = db.prepare(`
-    INSERT OR IGNORE INTO movies (title, year, imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, source_url, type)
-    VALUES (@title, @year, @imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @source_url, @type)
+    INSERT OR IGNORE INTO movies (title, year, imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, source_url, type, country)
+    VALUES (@title, @year, @imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @source_url, @type, @country)
   `);
 
   const insertEpisodeStmt = db.prepare(`
-    INSERT OR IGNORE INTO movies (title, year, series_imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, source_url, type, season, episode, episode_title)
-    VALUES (@title, @year, @series_imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @source_url, @type, @season, @episode, @episode_title)
+    INSERT OR IGNORE INTO movies (title, year, series_imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, source_url, type, season, episode, episode_title, country)
+    VALUES (@title, @year, @series_imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @source_url, @type, @season, @episode, @episode_title, @country)
   `);
 
   // Update source if movie exists from torrent

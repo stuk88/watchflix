@@ -121,6 +121,9 @@ async function startPlayer() {
 
 onUnmounted(() => {
   destroyHls();
+  if (props.movieId) {
+    axios.post(`/api/movies/${props.movieId}/cleanup-cache`).catch(() => {});
+  }
 });
 </script>
 

@@ -44,8 +44,8 @@ function parseTorrentName(name) {
 }
 
 const insertStmt = db.prepare(`
-  INSERT OR IGNORE INTO movies (title, year, imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, torrent_magnet, torrent_quality)
-  VALUES (@title, @year, @imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @torrent_magnet, @torrent_quality)
+  INSERT OR IGNORE INTO movies (title, year, imdb_id, imdb_rating, rt_rating, meta_rating, poster, plot, genre, runtime, director, actors, source, torrent_magnet, torrent_quality, country)
+  VALUES (@title, @year, @imdb_id, @imdb_rating, @rt_rating, @meta_rating, @poster, @plot, @genre, @runtime, @director, @actors, @source, @torrent_magnet, @torrent_quality, @country)
 `);
 
 const updateStmt = db.prepare(`
@@ -116,6 +116,7 @@ export async function scrapeTorrentsYTS(pages = 3, genre = null) {
           source: 'torrent',
           torrent_magnet: magnet,
           torrent_quality: best.quality,
+          country: null,
         });
         saved++;
       }

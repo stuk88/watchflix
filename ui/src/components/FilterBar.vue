@@ -24,10 +24,25 @@
       </select>
     </label>
     <label>
+      Country
+      <select v-model="store.filters.country" @change="apply">
+        <option value="">All</option>
+        <option v-for="c in countries" :key="c" :value="c">{{ c }}</option>
+      </select>
+    </label>
+    <label>
+      Rating
+      <select :value="store.ratingProvider" @change="onProviderChange($event.target.value)">
+        <option value="imdb">IMDb</option>
+        <option value="rt">Rotten Tomatoes</option>
+        <option value="meta">Metascore</option>
+      </select>
+    </label>
+    <label>
       Sort
       <select v-model="store.filters.sort" @change="apply">
         <option value="added_at">Recently Added</option>
-        <option value="imdb_rating">IMDb Rating</option>
+        <option value="rating">{{ providerLabel }} Rating</option>
         <option value="year">Year</option>
         <option value="title">Title</option>
       </select>
@@ -55,26 +70,51 @@
       </select>
     </label>
     <label>
-      Min ⭐ {{ store.filters.min_rating }}
-      <input type="range" min="0" max="10" step="0.5" v-model.number="store.filters.min_rating" @change="apply" />
+      Min {{ providerLabel }} {{ store.filters.min_rating }}{{ store.ratingProvider === 'rt' ? '%' : '' }}
+      <input type="range" :min="ratingRange.min" :max="ratingRange.max" :step="ratingRange.step" v-model.number="store.filters.min_rating" @change="apply" />
     </label>
     <span class="filter-stats">{{ store.total }} movies</span>
   </div>
 </template>
 
 <script setup>
+import { computed, ref, onMounted } from 'vue';
+import axios from 'axios';
 import { useMoviesStore } from '../stores/movies.js';
 
 const store = useMoviesStore();
+const countries = ref([]);
+
+onMounted(async () => {
+  try {
+    const { data } = await axios.get('/api/movies/countries');
+    countries.value = data.countries;
+  } catch (e) {
+    console.error('Failed to load countries:', e);
+  }
+});
 
 const genres = [
   'Action', 'Adventure', 'Animation', 'Biography', 'Comedy', 'Crime',
-  'Documentary', 'Drama', 'Family', 'Fantasy', 'History', 'Horror',
-  'Music', 'Mystery', 'Romance', 'Sci-Fi', 'Sport', 'Thriller', 'War', 'Western'
+  'Documentary', 'Drama', 'Family', 'Fantasy', 'Film-Noir', 'Game-Show',
+  'History', 'Horror', 'Music', 'Musical', 'Mystery', 'News', 'Reality-TV',
+  'Romance', 'Sci-Fi', 'Short', 'Sport', 'Talk-Show', 'Thriller', 'War', 'Western'
 ];
 
+const providerLabels = { imdb: 'IMDb', rt: 'RT', meta: 'Meta' };
+const providerLabel = computed(() => providerLabels[store.ratingProvider] || 'IMDb');
+
+const ratingRange = computed(() => {
+  if (store.ratingProvider === 'imdb') return { min: 0, max: 10, step: 0.5 };
+  return { min: 0, max: 100, step: 5 };
+});
+
+function onProviderChange(provider) {
+  store.setRatingProvider(provider);
+  apply();
+}
+
 function onLanguageChange() {
-  // Reset source filter when language changes (sources differ per language)
   store.filters.source = 'all';
   apply();
 }
