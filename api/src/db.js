@@ -1,13 +1,13 @@
-import Database from 'better-sqlite3';
+import { openDatabase } from './db/index.js';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbDir = join(__dirname, '..', 'data');
+const dbDir = process.env.CAPACITOR_NODEJS_DATA_DIR || join(__dirname, '..', 'data');
 mkdirSync(dbDir, { recursive: true });
 
-const db = new Database(join(dbDir, 'watchflix.db'));
+const db = await openDatabase(join(dbDir, 'watchflix.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
