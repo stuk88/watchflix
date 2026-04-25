@@ -1142,6 +1142,18 @@ onUnmounted(() => {
 .speed-ok { color: #f0c040; }
 .speed-slow { color: #ff6060; }
 .speed-unknown { color: var(--text-muted); }
+
+@media (max-width: 480px) {
+  .torrent-info { gap: 8px; font-size: 11px; flex-wrap: wrap; }
+  .sync-bar { flex-wrap: wrap; gap: 4px; }
+  .btn-sync { padding: 4px 10px; font-size: 12px; min-height: 32px; }
+  .sync-label { min-width: 60px; font-size: 11px; }
+  .btn-alt { font-size: 12px; padding: 10px 12px; }
+  .save-offline-bar { flex-wrap: wrap; }
+  .torrent-filename { font-size: 11px; }
+  .player-start { min-height: 200px; }
+  .start-icon { font-size: 36px; }
+}
 </style>
 
 <style>

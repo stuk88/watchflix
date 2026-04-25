@@ -6,7 +6,7 @@ import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats, destroyTorrent, getFileInfo, saveToOffline, cancelSave } from '../services/streamer.js';
 import { extractEmbedUrl, getAvailableServers } from '../services/stream-extractor.js';
 import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
-import { getCriticScores } from '../services/review-scraper.js';
+import { getCriticScores } from '../services/review-scraper-lite.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';

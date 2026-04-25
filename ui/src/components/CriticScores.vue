@@ -342,4 +342,16 @@ onMounted(async () => {
 .critic-review-link:hover {
   text-decoration: underline;
 }
+
+@media (max-width: 480px) {
+  .critic-card { padding: 14px; }
+  .critic-big-score { font-size: 28px; }
+  .critic-heading { font-size: 14px; }
+  .critic-bar-meta { font-size: 12px; }
+  .critic-review-header { padding: 8px 10px; }
+  .critic-review-score { font-size: 15px; width: 30px; }
+  .critic-review-source { font-size: 12px; }
+  .critic-review-summary { max-width: 200px; font-size: 10px; }
+  .critic-review-detail { padding: 8px 10px 12px; }
+}
 </style>
