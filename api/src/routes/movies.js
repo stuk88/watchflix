@@ -6,7 +6,11 @@ import { makeMagnet } from '../scrapers/torrents.js';
 import { getVideoFile, getStats, destroyTorrent, getFileInfo, saveToOffline, cancelSave } from '../services/streamer.js';
 import { extractEmbedUrl, getAvailableServers } from '../services/stream-extractor.js';
 import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
-import { getCriticScores } from '../services/review-scraper-lite.js';
+import { getCriticScores as getCriticScoresPlaywright } from '../services/review-scraper.js';
+import { getCriticScores as getCriticScoresLite } from '../services/review-scraper-lite.js';
+
+const isElectron = !!process.versions?.electron;
+const getCriticScores = isElectron ? getCriticScoresPlaywright : getCriticScoresLite;
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
