@@ -1,5 +1,11 @@
 <template>
-  <div class="filter-bar">
+  <div class="filter-bar" :class="{ collapsed: !filtersOpen }">
+    <button class="filter-toggle" @click="filtersOpen = !filtersOpen">
+      <span>Filters</span>
+      <span class="filter-summary">{{ store.total }} movies</span>
+      <span class="filter-chevron">{{ filtersOpen ? '▲' : '▼' }}</span>
+    </button>
+    <div class="filter-fields" v-show="filtersOpen">
     <label>
       Language
       <select v-model="store.filters.language" @change="onLanguageChange">
@@ -74,6 +80,7 @@
       <input type="range" :min="ratingRange.min" :max="ratingRange.max" :step="ratingRange.step" v-model.number="store.filters.min_rating" @change="apply" />
     </label>
     <span class="filter-stats">{{ store.total }} movies</span>
+    </div>
   </div>
 </template>
 
@@ -83,6 +90,7 @@ import axios from 'axios';
 import { useMoviesStore } from '../stores/movies.js';
 
 const store = useMoviesStore();
+const filtersOpen = ref(window.innerWidth > 768);
 const countries = ref([]);
 
 onMounted(async () => {

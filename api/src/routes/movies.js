@@ -16,7 +16,9 @@ let getCriticScores;
 try { ({ makeMagnet } = await import('../scrapers/torrents.js')); } catch {}
 try {
   ({ getVideoFile, getStats, destroyTorrent, getFileInfo, saveToOffline, cancelSave } = await import('../services/streamer.js'));
-} catch {}
+} catch (e) {
+  console.error('[movies] streamer.js import failed:', e.message);
+}
 try {
   ({ extractEmbedUrl, getAvailableServers } = await import('../services/stream-extractor.js'));
 } catch {}
