@@ -1,0 +1,1 @@
+import{W as e}from"./index-9OitXstn.js";import"./index-Cx4NjG5R.js";class o extends e{unavailableNodeJS(){return this.unavailable("The NodeJS engine is not available in the browser!")}start(){throw this.unavailableNodeJS()}send(){throw this.unavailableNodeJS()}whenReady(){throw this.unavailableNodeJS()}}export{o as CapacitorNodeJSWeb};

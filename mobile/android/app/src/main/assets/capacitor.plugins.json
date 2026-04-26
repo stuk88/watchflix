@@ -1,1 +1,6 @@
-[]
+[
+	{
+		"pkg": "capacitor-nodejs",
+		"classpath": "net.hampoelz.capacitor.nodejs.CapacitorNodeJSPlugin"
+	}
+]
