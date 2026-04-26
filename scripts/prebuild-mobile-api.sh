@@ -33,19 +33,9 @@ rm -f "$BUNDLE_DIR/api-bundle/src/routes/russian-search.js"
 rm -f "$BUNDLE_DIR/api-bundle/src/index.js"
 rm -f "$BUNDLE_DIR/api-bundle/src/services/scheduler.js"
 
-# Copy pre-populated database
-echo "==> Copying pre-populated database..."
+# Create empty data dir (DB will be created on first launch with empty tables)
 mkdir -p "$BUNDLE_DIR/api-bundle/data"
-if [ -f "$API_DIR/data/watchflix.db" ]; then
-  # Checkpoint WAL first
-  if command -v sqlite3 &>/dev/null; then
-    sqlite3 "$API_DIR/data/watchflix.db" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
-  fi
-  cp "$API_DIR/data/watchflix.db" "$BUNDLE_DIR/api-bundle/data/watchflix.db"
-  echo "==> Database copied ($(du -h "$BUNDLE_DIR/api-bundle/data/watchflix.db" | cut -f1))"
-else
-  echo "==> WARNING: No database found at $API_DIR/data/watchflix.db"
-fi
+echo "==> Mobile starts with empty DB (tables auto-created on launch)"
 
 # Install mobile-compatible dependencies only
 echo "==> Installing mobile dependencies..."
