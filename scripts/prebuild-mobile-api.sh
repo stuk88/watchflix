@@ -26,6 +26,11 @@ rm -f "$BUNDLE_DIR/api-bundle/src/debug-embed.js"
 rm -f "$BUNDLE_DIR/api-bundle/src/backfill-country.js"
 rm -f "$BUNDLE_DIR/api-bundle/src/extract-streams.js"
 rm -f "$BUNDLE_DIR/api-bundle/src/clean-no-peers.js"
+rm -f "$BUNDLE_DIR/api-bundle/src/scrape-deep.js"
+rm -f "$BUNDLE_DIR/api-bundle/src/scrapers/hdrezka.js"
+rm -f "$BUNDLE_DIR/api-bundle/src/scrapers/seazonvar.js"
+rm -f "$BUNDLE_DIR/api-bundle/src/scrapers/filmix.js"
+rm -f "$BUNDLE_DIR/api-bundle/src/scrapers/123movies.js"
 
 # Copy pre-populated database
 echo "==> Copying pre-populated database..."
