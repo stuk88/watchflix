@@ -429,7 +429,7 @@ function serveFileWithRange(filePath, req, res) {
 }
 
 // Stream torrent video via server-side WebTorrent (HTTP range support)
-router.get('/:id/stream', desktopOnly, async (req, res) => {
+router.get('/:id/stream', async (req, res) => {
   const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
@@ -492,7 +492,7 @@ router.get('/:id/stream', desktopOnly, async (req, res) => {
 });
 
 // Destroy torrent and delete cached files (called when player closes)
-router.delete('/:id/stream', desktopOnly, (req, res) => {
+router.delete('/:id/stream', (req, res) => {
   const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
   let destroyed = false;
   if (movie?.torrent_magnet) {
@@ -513,7 +513,7 @@ router.post('/:id/cleanup-cache', (req, res) => {
 });
 
 // Get torrent streaming stats
-router.get('/:id/stream-stats', desktopOnly, (req, res) => {
+router.get('/:id/stream-stats', (req, res) => {
   const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
   if (!movie?.torrent_magnet) return res.json({ peers: 0 });
   const stats = getStats(movie.torrent_magnet);
