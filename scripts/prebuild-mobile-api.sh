@@ -66,9 +66,21 @@ PKGJSON
 
 cd "$TEMP_DIR"
 npm install --production 2>&1 | tail -3
+rm -rf "$BUNDLE_DIR/node_modules"
 mv "$TEMP_DIR/node_modules" "$BUNDLE_DIR/node_modules"
 rm -rf "$TEMP_DIR"
 
 PKG_COUNT=$(ls "$BUNDLE_DIR/node_modules" | wc -l | tr -d ' ')
 echo "==> Bundled $PKG_COUNT packages in nodejs/node_modules"
-echo "==> Mobile API bundle complete"
+
+# Copy nodejs/ into the built UI dist so capacitor-nodejs can find it
+UI_DIST="$REPO_ROOT/ui/dist"
+if [ -d "$UI_DIST" ]; then
+  echo "==> Copying nodejs bundle into ui/dist/nodejs/..."
+  rm -rf "$UI_DIST/nodejs"
+  cp -r "$BUNDLE_DIR" "$UI_DIST/nodejs"
+  echo "==> Mobile API bundle complete ($(du -sh "$UI_DIST/nodejs" | cut -f1) in ui/dist/nodejs/)"
+else
+  echo "==> WARNING: ui/dist not found. Run 'npm run build -w ui' first."
+  echo "==> Mobile API bundle complete"
+fi
