@@ -577,17 +577,70 @@ async function autoSync() {
   }
 }
 
+let browserClient = null;
+let browserTorrent = null;
+
+async function startBrowserTorrent() {
+  const WebTorrent = (await import('webtorrent/dist/webtorrent.min.js')).default;
+  browserClient = new WebTorrent();
+  status.value = 'loading';
+
+  browserTorrent = browserClient.add(props.magnet);
+  browserTorrent.on('ready', () => {
+    const videoExts = ['.mp4', '.mkv', '.avi', '.webm', '.mov', '.m4v'];
+    const videos = browserTorrent.files.filter(f => videoExts.some(ext => f.name.toLowerCase().endsWith(ext)));
+    const file = videos.length
+      ? videos.reduce((a, b) => a.length > b.length ? a : b)
+      : browserTorrent.files.reduce((a, b) => a.length > b.length ? a : b);
+
+    file.renderTo(videoEl.value, { autoplay: true }, () => {
+      status.value = 'playing';
+    });
+
+    torrentFilename.value = file.name;
+  });
+
+  browserTorrent.on('download', () => {
+    if (browserTorrent) {
+      peerCount.value = browserTorrent.numPeers;
+      downloadSpeed.value = formatSpeed(browserTorrent.downloadSpeed);
+      uploadSpeed.value = formatSpeed(browserTorrent.uploadSpeed);
+      progress.value = (browserTorrent.progress * 100).toFixed(1);
+    }
+  });
+}
+
 async function startPlayer() {
   if (!props.movieId) return;
   started.value = true;
   status.value = 'loading';
   activeMovieId.value = props.movieId;
-  activeStreamUrl.value = `/api/movies/${props.movieId}/stream`;
+
+  // Check if server-side streaming is available
+  let useServerStream = true;
+  try {
+    const { data } = await axios.get('/api/health');
+    if (data.mobile) {
+      // Test if stream endpoint works
+      const test = await axios.get(`/api/movies/${props.movieId}/stream-stats`).catch(e => e.response);
+      if (test?.status === 501 || !test?.data?.peers === undefined) useServerStream = false;
+    }
+  } catch {
+    useServerStream = false;
+  }
 
   fetchSubtitlesForMovie();
   subtitlesFetched = false;
 
   await nextTick();
+
+  if (!useServerStream && props.magnet) {
+    // Browser-based WebTorrent (mobile / no server streaming)
+    await startBrowserTorrent();
+    return;
+  }
+
+  activeStreamUrl.value = `/api/movies/${props.movieId}/stream`;
 
   // Init Video.js player
   if (videoEl.value && !vjsPlayer) {
@@ -602,10 +655,8 @@ async function startPlayer() {
       },
       userActions: {
         hotkeys: function(event) {
-          // Left arrow: -5s, Right arrow: +5s
           if (event.which === 37) { this.currentTime(this.currentTime() - 5); }
           else if (event.which === 39) { this.currentTime(this.currentTime() + 5); }
-          // Space: play/pause
           else if (event.which === 32) { this.paused() ? this.play() : this.pause(); }
         }
       },
@@ -756,10 +807,10 @@ async function removeMovie() {
 
 onUnmounted(() => {
   removeBufferOverlay();
+  if (browserClient) { browserClient.destroy(); browserClient = null; }
   if (vjsPlayer) { vjsPlayer.dispose(); vjsPlayer = null; }
   if (statsInterval) clearInterval(statsInterval);
   if (peerCheckTimer) clearTimeout(peerCheckTimer);
-  // Destroy torrent and delete cached files (backend defers if save is in progress)
   if (activeMovieId.value) {
     axios.delete(`/api/movies/${activeMovieId.value}/stream`).catch(() => {});
   }
