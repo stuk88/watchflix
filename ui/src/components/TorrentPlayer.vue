@@ -620,11 +620,7 @@ async function startPlayer() {
   let useServerStream = true;
   try {
     const { data } = await axios.get('/api/health');
-    if (data.mobile) {
-      // Test if stream endpoint works
-      const test = await axios.get(`/api/movies/${props.movieId}/stream-stats`).catch(e => e.response);
-      if (test?.status === 501 || !test?.data?.peers === undefined) useServerStream = false;
-    }
+    if (data.torrentStream === false) useServerStream = false;
   } catch {
     useServerStream = false;
   }

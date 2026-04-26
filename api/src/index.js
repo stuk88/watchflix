@@ -13,7 +13,7 @@ app.use(cors());
 // Subtitle cues for whisper-sync can be large (1000+ cues × ~100 bytes each)
 app.use(express.json({ limit: '5mb' }));
 
-app.get('/api/health', (_, res) => res.json({ ok: true }));
+app.get('/api/health', (_, res) => res.json({ ok: true, torrentStream: true }));
 app.use('/api', requireAuth);
 app.use('/api/movies', moviesRouter);
 app.use('/api/scrape', sourcesRouter);

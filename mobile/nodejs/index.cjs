@@ -82,7 +82,7 @@ async function startApi() {
     app.use(cors());
     app.use(express.json({ limit: '5mb' }));
 
-    app.get('/api/health', (_, res) => res.json({ ok: true, mobile: true, movies: count.c }));
+    app.get('/api/health', (_, res) => res.json({ ok: true, mobile: true, movies: count.c, torrentStream: false }));
     app.use('/api/movies', moviesRouter);
     if (torrentSearchRouter) app.use('/api/torrent-search', torrentSearchRouter);
 
