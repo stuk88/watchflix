@@ -2,3 +2,5 @@ node_modules\n.DS_Store
 .env
 test-results/
 *.bak
+*.db-shm
+*.db-wal
