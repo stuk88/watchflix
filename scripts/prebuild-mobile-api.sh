@@ -49,6 +49,7 @@ cat > "$TEMP_DIR/package.json" << 'PKGJSON'
     "express": "^4.21.1",
     "cors": "^2.8.5",
     "axios": "1.6.8",
+    "undici": "5.28.4",
     "cheerio": "^1.0.0",
     "sql.js": "^1.12.0",
     "webtorrent": "^2.8.5",
