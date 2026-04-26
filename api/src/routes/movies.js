@@ -2,17 +2,38 @@ import { Router } from 'express';
 import axios from 'axios';
 import db from '../db.js';
 import config, { isAllowedProxyUrl } from '../config.js';
-import { makeMagnet } from '../scrapers/torrents.js';
-import { getVideoFile, getStats, destroyTorrent, getFileInfo, saveToOffline, cancelSave } from '../services/streamer.js';
-import { extractEmbedUrl, getAvailableServers } from '../services/stream-extractor.js';
-import { fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } from '../services/subtitles.js';
-import { getCriticScores as getCriticScoresPlaywright } from '../services/review-scraper.js';
-import { getCriticScores as getCriticScoresLite } from '../services/review-scraper-lite.js';
-
-const isElectron = !!process.versions?.electron;
-const getCriticScores = isElectron ? getCriticScoresPlaywright : getCriticScoresLite;
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+
+const isMobile = !!process.env.CAPACITOR_NODEJS;
+const isElectron = !!process.versions?.electron;
+
+let makeMagnet, getVideoFile, getStats, destroyTorrent, getFileInfo, saveToOffline, cancelSave;
+let extractEmbedUrl, getAvailableServers;
+let fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt;
+let getCriticScores;
+
+try { ({ makeMagnet } = await import('../scrapers/torrents.js')); } catch {}
+try {
+  ({ getVideoFile, getStats, destroyTorrent, getFileInfo, saveToOffline, cancelSave } = await import('../services/streamer.js'));
+} catch {}
+try {
+  ({ extractEmbedUrl, getAvailableServers } = await import('../services/stream-extractor.js'));
+} catch {}
+try {
+  ({ fetchSubtitles, fetchSubtitlesByFilename, fetchAndConvertSubtitle, srtToVtt } = await import('../services/subtitles.js'));
+} catch {}
+
+if (isElectron) {
+  try {
+    ({ getCriticScores } = await import('../services/review-scraper.js'));
+  } catch {}
+}
+if (!getCriticScores) {
+  try {
+    ({ getCriticScores } = await import('../services/review-scraper-lite.js'));
+  } catch {}
+}
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -20,6 +41,10 @@ import path from 'path';
 const execFileAsync = promisify(execFile);
 
 const router = Router();
+const desktopOnly = (req, res, next) => {
+  if (isMobile) return res.status(501).json({ error: 'Not available on mobile' });
+  next();
+};
 
 // List movies with pagination, sort, filter
 router.get('/', (req, res) => {
@@ -404,7 +429,7 @@ function serveFileWithRange(filePath, req, res) {
 }
 
 // Stream torrent video via server-side WebTorrent (HTTP range support)
-router.get('/:id/stream', async (req, res) => {
+router.get('/:id/stream', desktopOnly, async (req, res) => {
   const movie = db.prepare('SELECT * FROM movies WHERE id = ?').get(req.params.id);
   if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
@@ -467,7 +492,7 @@ router.get('/:id/stream', async (req, res) => {
 });
 
 // Destroy torrent and delete cached files (called when player closes)
-router.delete('/:id/stream', (req, res) => {
+router.delete('/:id/stream', desktopOnly, (req, res) => {
   const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
   let destroyed = false;
   if (movie?.torrent_magnet) {
@@ -488,7 +513,7 @@ router.post('/:id/cleanup-cache', (req, res) => {
 });
 
 // Get torrent streaming stats
-router.get('/:id/stream-stats', (req, res) => {
+router.get('/:id/stream-stats', desktopOnly, (req, res) => {
   const movie = db.prepare('SELECT torrent_magnet FROM movies WHERE id = ?').get(req.params.id);
   if (!movie?.torrent_magnet) return res.json({ peers: 0 });
   const stats = getStats(movie.torrent_magnet);
@@ -702,7 +727,7 @@ router.get('/:id/torrent-subtitle/:index', async (req, res) => {
 });
 
 // Auto-sync subtitle against video audio using ffsubsync
-router.post('/:id/subtitle-sync', async (req, res) => {
+router.post('/:id/subtitle-sync', desktopOnly, async (req, res) => {
   const { subtitleUrl } = req.body;
   if (!subtitleUrl) return res.status(400).json({ error: 'Missing subtitleUrl' });
 
@@ -776,7 +801,7 @@ router.post('/:id/subtitle-sync', async (req, res) => {
 });
 
 // Whisper-based smart subtitle sync: extract audio snippet, transcribe, fuzzy-match subtitle cues
-router.post('/:id/whisper-sync', async (req, res) => {
+router.post('/:id/whisper-sync', desktopOnly, async (req, res) => {
   const { currentTime, subtitleCues, subtitleLanguage } = req.body;
 
   if (typeof currentTime !== 'number') {
